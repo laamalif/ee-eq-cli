@@ -43,6 +43,7 @@ class Lv2HostCore {
   auto operator=(const Lv2HostCore&) -> Lv2HostCore& = delete;
 
   auto found_plugin() const -> bool { return found_plugin_; }
+  auto init_error() const -> const std::string& { return init_error_; }
   auto create_instance(uint32_t sample_rate, uint32_t block_size) -> bool;
   void destroy_instance();
 
@@ -73,6 +74,7 @@ class Lv2HostCore {
   const LilvPlugin* plugin_ = nullptr;
   LilvInstance* instance_ = nullptr;
   bool found_plugin_ = false;
+  std::string init_error_;
   uint32_t sample_rate_ = 0;
   uint32_t block_size_ = 0;
   float sample_rate_option_ = 0.0F;

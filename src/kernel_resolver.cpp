@@ -4,6 +4,7 @@
 #include <cctype>
 #include <cstdlib>
 #include <filesystem>
+#include <format>
 #include <string>
 
 namespace ee {
@@ -89,7 +90,7 @@ auto resolve_convolver_kernel(const ConvolverPreset& preset, std::string& warnin
   }
 
   if (std::filesystem::exists(sofa_path)) {
-    warning = "SOFA kernel found but SOFA convolver support is not implemented yet: " + kernel_name;
+    warning = std::format("SOFA kernel found but SOFA convolver support is not implemented yet: {}", kernel_name);
     return std::nullopt;
   }
 
@@ -111,16 +112,16 @@ auto resolve_convolver_kernel(const ConvolverPreset& preset, std::string& warnin
       }
 
       if (extension_is(path, ".sofa")) {
-        warning = "SOFA kernel matched by fuzzy name but SOFA support is not implemented yet: " + path.filename().string();
+        warning = std::format("SOFA kernel matched by fuzzy name but SOFA support is not implemented yet: {}", path.filename().string());
         return std::nullopt;
       }
 
-      warning = "convolver kernel exact name not found; using fuzzy local match: " + path.filename().string();
+      warning = std::format("convolver kernel exact name not found; using fuzzy local match: {}", path.filename().string());
       return ResolvedKernel{.name = path.stem().string(), .path = path.string(), .is_sofa = false};
     }
   }
 
-  warning = "convolver kernel not found under " + base_dir.string() + ": " + kernel_name;
+  warning = std::format("convolver kernel not found under {}: {}", base_dir.string(), kernel_name);
   return std::nullopt;
 }
 

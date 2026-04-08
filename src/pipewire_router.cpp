@@ -120,7 +120,7 @@ class PipeWireRouter::EqFilterNode {
 
   auto connect(std::string& error) -> bool {
     if (!host_.found_plugin()) {
-      error = "LSP LV2 equalizer plugin is not installed or discoverable";
+      error = host_.init_error().empty() ? "LSP LV2 equalizer plugin is not installed or discoverable" : host_.init_error();
       return false;
     }
 
@@ -345,7 +345,7 @@ class PipeWireRouter::LimiterFilterNode {
 
   auto connect(std::string& error) -> bool {
     if (!host_.found_plugin()) {
-      error = "LSP LV2 limiter plugin is not installed or discoverable";
+      error = host_.init_error().empty() ? "LSP LV2 limiter plugin is not installed or discoverable" : host_.init_error();
       return false;
     }
 

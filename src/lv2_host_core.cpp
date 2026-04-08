@@ -31,13 +31,13 @@ auto lv2_printf([[maybe_unused]] LV2_Log_Handle handle, [[maybe_unused]] LV2_URI
 Lv2HostCore::Lv2HostCore(std::string plugin_uri) : plugin_uri_(std::move(plugin_uri)) {
   world_ = lilv_world_new();
   if (world_ == nullptr) {
-    log::error("failed to initialize Lilv world");
+    init_error_ = "failed to initialize Lilv world";
     return;
   }
 
   auto* uri = lilv_new_uri(world_, plugin_uri_.c_str());
   if (uri == nullptr) {
-    log::error(std::format("invalid LV2 plugin URI: {}", plugin_uri_));
+    init_error_ = std::format("invalid LV2 plugin URI: {}", plugin_uri_);
     return;
   }
 
@@ -47,7 +47,7 @@ Lv2HostCore::Lv2HostCore(std::string plugin_uri) : plugin_uri_(std::move(plugin_
   lilv_node_free(uri);
 
   if (plugin_ == nullptr) {
-    log::error(std::format("could not find LV2 plugin: {}", plugin_uri_));
+    init_error_ = std::format("could not find LV2 plugin: {}", plugin_uri_);
     return;
   }
 

@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <format>
 #include <numbers>
 #include <ranges>
 #include <string>
@@ -69,7 +70,7 @@ auto validate_label(const std::string& value,
                     std::string& error)
     -> std::string {
   if (std::ranges::find(labels, value) == labels.end()) {
-    error = "unsupported value '" + value + "' for " + std::string(field);
+    error = std::format("unsupported value '{}' for {}", value, field);
     return {};
   }
   return value;
@@ -159,7 +160,7 @@ auto push_plugin_kind(std::vector<std::string>& plugin_order,
                       std::string& error) -> bool {
   const auto duplicate = std::ranges::find(plugin_order, plugin_kind) != plugin_order.end();
   if (duplicate) {
-    error = "duplicate plugin kind is not supported: " + std::string(plugin_kind);
+    error = std::format("duplicate plugin kind is not supported: {}", plugin_kind);
     return false;
   }
 
@@ -238,7 +239,7 @@ auto parse_easy_effects_preset(std::string_view bytes, std::string& error) -> Pa
   try {
     json = nlohmann::json::parse(bytes.begin(), bytes.end());
   } catch (const std::exception& e) {
-    error = std::string("invalid preset JSON: ") + e.what();
+    error = std::format("invalid preset JSON: {}", e.what());
     return {};
   }
 
@@ -275,7 +276,7 @@ auto parse_easy_effects_preset(std::string_view bytes, std::string& error) -> Pa
         return {};
       }
     } else {
-      parsed.warnings.push_back("skipping unsupported plugin: " + plugin);
+      parsed.warnings.push_back(std::format("skipping unsupported plugin: {}", plugin));
     }
   }
   if (!has_equalizer) {
@@ -330,7 +331,7 @@ auto parse_easy_effects_preset(std::string_view bytes, std::string& error) -> Pa
   }
 
   for (int i = 0; i < kMaxBands; ++i) {
-    const auto band_key = "band" + std::to_string(i);
+    const auto band_key = std::format("band{}", i);
     preset.left[i] = parse_band(eq.at("left"), band_key, preset.left[i], error);
     if (!error.empty()) {
       return {};

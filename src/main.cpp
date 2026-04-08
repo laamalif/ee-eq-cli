@@ -2,6 +2,7 @@
 #include <array>
 #include <cstdlib>
 #include <csignal>
+#include <format>
 #include <cerrno>
 #include <climits>
 #include <cstring>
@@ -36,7 +37,7 @@ auto summarize_plugins(const ee::ParsedPreset& preset) -> std::string {
 
 auto summarize_effective_config(const ee::CliArgs& args, const ee::ParsedPreset& preset) -> std::string {
   const auto sink = args.sink_selector.empty() ? std::string("auto") : args.sink_selector;
-  return "effective config: sink=" + sink + " stages=" + summarize_plugins(preset);
+  return std::format("effective config: sink={} stages={}", sink, summarize_plugins(preset));
 }
 
 auto wait_for_shutdown_signal(ee::PipeWireRouter& router) -> int {
@@ -121,7 +122,7 @@ int main(int argc, char* argv[]) {
     return EXIT_SUCCESS;
   }
   if (args.show_version) {
-    ee::log::info(std::string(kApplicationName) + " " + kApplicationVersion);
+    ee::log::info(std::format("{} {}", kApplicationName, kApplicationVersion));
     return EXIT_SUCCESS;
   }
 
@@ -161,17 +162,17 @@ int main(int argc, char* argv[]) {
   }
 
   if (args.preset_from_env) {
-    ee::log::info("preset source: " + loaded.origin + " (from EE_EQ_CLI_DEFAULT_PRESET)");
+    ee::log::info(std::format("preset source: {} (from EE_EQ_CLI_DEFAULT_PRESET)", loaded.origin));
   } else {
-    ee::log::info("preset source: " + loaded.origin);
+    ee::log::info(std::format("preset source: {}", loaded.origin));
   }
   ee::log::info(summarize_effective_config(args, preset));
   if (!args.sink_selector.empty()) {
-    ee::log::info("sink override requested: " + args.sink_selector);
+    ee::log::info(std::format("sink override requested: {}", args.sink_selector));
   }
 
   if (args.dry_run) {
-    ee::log::info("supported plugin order: " + summarize_plugins(preset));
+    ee::log::info(std::format("supported plugin order: {}", summarize_plugins(preset)));
     ee::log::info("dry-run complete");
     return EXIT_SUCCESS;
   }
@@ -183,7 +184,7 @@ int main(int argc, char* argv[]) {
     return EXIT_FAILURE;
   }
 
-  ee::log::info("ee-eq-cli active with preset: " + loaded.origin);
+  ee::log::info(std::format("ee-eq-cli active with preset: {}", loaded.origin));
   wait_for_shutdown_signal(router);
   router.stop();
   return EXIT_SUCCESS;
