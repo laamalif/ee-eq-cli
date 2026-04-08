@@ -147,6 +147,7 @@ class PipeWireRouter::EqFilterNode {
 
     filter_ = pw_filter_new(core_, kEqNodeName, props);
     if (filter_ == nullptr) {
+      pw_properties_free(props);
       pw_thread_loop_unlock(thread_loop_);
       error = "failed to create PipeWire EQ filter node";
       return false;
@@ -376,6 +377,7 @@ class PipeWireRouter::LimiterFilterNode {
 
     filter_ = pw_filter_new(core_, kLimiterNodeName, props);
     if (filter_ == nullptr) {
+      pw_properties_free(props);
       pw_thread_loop_unlock(thread_loop_);
       error = "failed to create PipeWire limiter filter node";
       return false;
@@ -623,6 +625,7 @@ class PipeWireRouter::ConvolverFilterNode {
 
     filter_ = pw_filter_new(core_, "ee_eq_cli_convolver", props);
     if (filter_ == nullptr) {
+      pw_properties_free(props);
       pw_thread_loop_unlock(thread_loop_);
       error = "failed to create PipeWire convolver filter node";
       return false;
