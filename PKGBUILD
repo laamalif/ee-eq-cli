@@ -1,12 +1,12 @@
 # Maintainer: local
 
-pkgname=ee-eq-cli-git
+pkgname=ee-eq-cli
 pkgver=0.2.9.2
 pkgrel=1
 pkgdesc='Minimal headless EasyEffects-compatible EQ preset loader for PipeWire/LV2'
 arch=(x86_64 aarch64)
-url='https://github.com/wwmm/easyeffects'
-license=('GPL3')
+url='https://github.com/laamalif/ee-eq-cli/'
+license=('MIT')
 depends=(
   'pipewire'
   'lilv'
