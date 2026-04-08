@@ -171,12 +171,16 @@ class PipeWireRouter::EqFilterNode {
     pw_thread_loop_wait(thread_loop_);
     pw_thread_loop_unlock(thread_loop_);
 
-    while (!can_get_node_id_) {
+    for (int i = 0; i < 5000 && !can_get_node_id_; ++i) {
       std::this_thread::sleep_for(std::chrono::milliseconds(1));
       if (state_ == PW_FILTER_STATE_ERROR) {
         error = "EQ filter entered PipeWire error state";
         return false;
       }
+    }
+    if (!can_get_node_id_) {
+      error = "timed out waiting for EQ filter node to become usable";
+      return false;
     }
 
     pw_thread_loop_lock(thread_loop_);
@@ -399,12 +403,16 @@ class PipeWireRouter::LimiterFilterNode {
     pw_thread_loop_wait(thread_loop_);
     pw_thread_loop_unlock(thread_loop_);
 
-    while (!can_get_node_id_) {
+    for (int i = 0; i < 5000 && !can_get_node_id_; ++i) {
       std::this_thread::sleep_for(std::chrono::milliseconds(1));
       if (state_ == PW_FILTER_STATE_ERROR) {
         error = "Limiter filter entered PipeWire error state";
         return false;
       }
+    }
+    if (!can_get_node_id_) {
+      error = "timed out waiting for limiter filter node to become usable";
+      return false;
     }
 
     pw_thread_loop_lock(thread_loop_);
@@ -633,12 +641,16 @@ class PipeWireRouter::ConvolverFilterNode {
     pw_thread_loop_wait(thread_loop_);
     pw_thread_loop_unlock(thread_loop_);
 
-    while (!can_get_node_id_) {
+    for (int i = 0; i < 5000 && !can_get_node_id_; ++i) {
       std::this_thread::sleep_for(std::chrono::milliseconds(1));
       if (state_ == PW_FILTER_STATE_ERROR) {
         error = "Convolver filter entered PipeWire error state";
         return false;
       }
+    }
+    if (!can_get_node_id_) {
+      error = "timed out waiting for convolver filter node to become usable";
+      return false;
     }
 
     pw_thread_loop_lock(thread_loop_);
@@ -991,9 +1003,12 @@ auto PipeWireRouter::list_sinks(std::string& error) -> std::vector<std::string> 
     return result;
   }
 
-  for (int i = 0; i < 2000; ++i) {
-    std::this_thread::sleep_for(std::chrono::milliseconds(1));
-  }
+  pw_thread_loop_lock(thread_loop_);
+  pw_core_sync(core_, PW_ID_CORE, 0);
+  pw_thread_loop_wait(thread_loop_);
+  pw_core_sync(core_, PW_ID_CORE, 0);
+  pw_thread_loop_wait(thread_loop_);
+  pw_thread_loop_unlock(thread_loop_);
 
   for (const auto& node : snapshot_nodes()) {
     if (node.media_class == "Audio/Sink" && node.name != kVirtualSinkName) {
