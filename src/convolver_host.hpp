@@ -1,5 +1,6 @@
 #pragma once
 
+#include <memory>
 #include <mutex>
 #include <span>
 #include <string>
@@ -43,7 +44,7 @@ class ConvolverHost {
   ConvolverPreset preset_{};
   KernelData kernel_{};
   KernelData original_kernel_{};
-  Convproc* conv_ = nullptr;
+  std::unique_ptr<Convproc> conv_;
   uint32_t block_size_ = 0;
   bool ready_ = false;
   mutable std::mutex mutex_;

@@ -1848,7 +1848,6 @@ void PipeWireRouter::on_node_proxy_removed(NodeData* data) {
                                   kLoopSuppressDuration.count()));
           }
         } else {
-          auto& guard = loop_guard_[loop_key];
           guard.rapid_removals = 0;
           guard.last_removed_at = now;
         }

@@ -28,7 +28,6 @@ auto use_realtime_convolver_thread() -> bool {
 
 ConvolverHost::~ConvolverHost() {
   stop();
-  delete conv_;
 }
 
 auto ConvolverHost::load_kernel_file(const ResolvedKernel& kernel, std::string& error) -> KernelData {
@@ -169,14 +168,13 @@ auto ConvolverHost::ensure_ready(uint32_t block_size) -> bool {
   }
 
   ready_ = false;
-  if (conv_ != nullptr) {
+  if (conv_) {
     conv_->stop_process();
     while (!conv_->check_stop()) {
       std::this_thread::sleep_for(std::chrono::milliseconds(1));
     }
   }
-  delete conv_;
-  conv_ = new Convproc();
+  conv_ = std::make_unique<Convproc>();
   block_size_ = block_size;
   conv_->set_options(0);
 
@@ -215,7 +213,7 @@ auto ConvolverHost::ensure_ready(uint32_t block_size) -> bool {
 
 auto ConvolverHost::process(std::span<float> left, std::span<float> right) -> bool {
   std::scoped_lock lock(mutex_);
-  if (!ready_ || conv_ == nullptr || conv_->state() != Convproc::ST_PROC) {
+  if (!ready_ || !conv_ || conv_->state() != Convproc::ST_PROC) {
     return false;
   }
   if (left.size() != block_size_ || right.size() != block_size_) {
@@ -244,7 +242,7 @@ auto ConvolverHost::process(std::span<float> left, std::span<float> right) -> bo
 void ConvolverHost::stop() {
   std::scoped_lock lock(mutex_);
   ready_ = false;
-  if (conv_ != nullptr) {
+  if (conv_) {
     conv_->stop_process();
     while (!conv_->check_stop()) {
       std::this_thread::sleep_for(std::chrono::milliseconds(1));
