@@ -1856,6 +1856,10 @@ void PipeWireRouter::on_registry_global(uint32_t id, const char* type, const spa
 
   if (std::strcmp(type, PW_TYPE_INTERFACE_Node) == 0) {
     auto* proxy = static_cast<pw_proxy*>(pw_registry_bind(registry_, id, type, PW_VERSION_NODE, sizeof(NodeData)));
+    if (proxy == nullptr) {
+      log::warn(std::format("failed to bind node {} (id {})", spa_dict_lookup(props, PW_KEY_NODE_NAME) ? spa_dict_lookup(props, PW_KEY_NODE_NAME) : "unknown", id));
+      return;
+    }
     auto* node_data = static_cast<NodeData*>(pw_proxy_get_user_data(proxy));
     node_data->router = this;
     node_data->proxy = proxy;
