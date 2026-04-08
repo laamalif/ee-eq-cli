@@ -1439,6 +1439,9 @@ void PipeWireRouter::queue_patch_stream(uint64_t node_serial) {
           }
         }
 
+        if (shutting_down_) {
+          return;
+        }
         patch_stream(node_serial);
       });
 }
