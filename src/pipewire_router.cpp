@@ -1358,21 +1358,29 @@ auto PipeWireRouter::connect_chain(std::string& error) -> bool {
 }
 
 void PipeWireRouter::patch_existing_streams() {
-  std::scoped_lock lock(state_mutex_);
-  size_t patched_now = 0;
-  for (const auto& node : bound_nodes_) {
-    if (node != nullptr && node->info != nullptr && node->info->media_class == "Stream/Output/Audio" &&
-        stream_targets_selected_sink(*node->info)) {
-      patch_stream(node->info->serial != 0 ? node->info->serial : node->info->id);
-      ++patched_now;
+  // Snapshot serials under state_mutex_, then release before calling
+  // patch_stream which acquires pw_thread_loop_lock.  Holding both locks
+  // simultaneously inverts the order used by PW-thread callbacks and deadlocks.
+  std::vector<uint64_t> serials_to_patch;
+  {
+    std::scoped_lock lock(state_mutex_);
+    for (const auto& node : bound_nodes_) {
+      if (node != nullptr && node->info != nullptr && node->info->media_class == "Stream/Output/Audio" &&
+          stream_targets_selected_sink(*node->info)) {
+        serials_to_patch.push_back(node->info->serial != 0 ? node->info->serial : node->info->id);
+      }
     }
   }
 
-  if (patched_now == 0U) {
-    log::warn("no matching output streams were patched for sink " + selected_sink_.name +
+  for (const auto serial : serials_to_patch) {
+    patch_stream(serial);
+  }
+
+  if (serials_to_patch.empty()) {
+    log::warn("no matching output streams were patched for sink " + snapshot_selected_sink().name +
               "; there may be no active output streams or they may target a different sink");
   } else {
-    log::info(std::format("patched {} existing output stream(s)", patched_now));
+    log::info(std::format("patched {} existing output stream(s)", serials_to_patch.size()));
   }
 }
 
@@ -1412,6 +1420,7 @@ void PipeWireRouter::patch_stream(uint64_t node_serial) {
   uint32_t origin_id = 0;
   uint32_t target_id = 0;
   uint64_t target_serial = 0;
+  std::string target_name;
   std::optional<NodeInfo> node_snapshot;
 
   {
@@ -1446,6 +1455,7 @@ void PipeWireRouter::patch_stream(uint64_t node_serial) {
     origin_id = node_snapshot->id;
     target_id = virtual_sink_.id;
     target_serial = virtual_sink_.serial;
+    target_name = virtual_sink_.name;
     patched_streams_.insert(node_serial);
     recent_patch_attempts_[node_serial] = PatchAttemptInfo{
         .name = node_snapshot->name,
@@ -1459,7 +1469,7 @@ void PipeWireRouter::patch_stream(uint64_t node_serial) {
                         node_snapshot->name,
                         node_snapshot->id,
                         node_snapshot->serial,
-                        virtual_sink_.name));
+                        target_name));
 }
 
 void PipeWireRouter::clear_patched_streams() {
@@ -1745,14 +1755,15 @@ void PipeWireRouter::set_metadata_target_node(uint32_t origin_id, uint32_t targe
   pw_thread_loop_wait(thread_loop_);
   pw_thread_loop_unlock(thread_loop_);
 
+  const auto vsink = snapshot_virtual_sink();
   if (auto node = find_node_by_id(origin_id); node.has_value()) {
     log::info(std::format("metadata target set: {} (id {}, serial {}) -> {}",
                           node->name,
                           node->id,
                           node->serial,
-                          virtual_sink_.name));
+                          vsink.name));
   } else {
-    log::info(std::format("metadata target set: stream id {} -> {}", origin_id, virtual_sink_.name));
+    log::info(std::format("metadata target set: stream id {} -> {}", origin_id, vsink.name));
   }
 }
 
@@ -2004,12 +2015,10 @@ void PipeWireRouter::on_metadata_property(const char* key, const char* value) {
       if (name == selected_sink_.name) {
         return;
       }
-    }
-
-    if (!startup_sink_locked_) {
-      std::scoped_lock lock(state_mutex_);
-      selected_sink_.name = name;
-      return;
+      if (!startup_sink_locked_.load(std::memory_order_acquire)) {
+        selected_sink_.name = name;
+        return;
+      }
     }
 
     if (sink_selector_.empty()) {

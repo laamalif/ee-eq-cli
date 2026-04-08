@@ -100,8 +100,8 @@ class PipeWireRouter {
 
   ParsedPreset preset_;
   std::string sink_selector_;
-  bool shutting_down_ = false;
-  bool startup_sink_locked_ = false;
+  std::atomic<bool> shutting_down_{false};
+  std::atomic<bool> startup_sink_locked_{false};
 
   pw_thread_loop* thread_loop_ = nullptr;
   pw_context* context_ = nullptr;

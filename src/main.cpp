@@ -22,7 +22,7 @@
 namespace {
 
 constexpr auto kApplicationName = "ee-eq-cli";
-constexpr auto kApplicationVersion = "0.2.9.5";
+constexpr auto kApplicationVersion = "0.2.9.6";
 
 auto summarize_plugins(const ee::ParsedPreset& preset) -> std::string {
   std::string summary;
