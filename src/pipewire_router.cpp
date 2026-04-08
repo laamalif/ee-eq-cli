@@ -856,9 +856,7 @@ void on_removed_node_proxy(void* data) {
   node->router->on_node_proxy_removed(node);
 }
 
-int on_metadata_property(void* data, uint32_t id, const char* key, const char* type, const char* value) {
-  (void)id;
-  (void)type;
+int on_metadata_property(void* data, [[maybe_unused]] uint32_t id, const char* key, [[maybe_unused]] const char* type, const char* value) {
   static_cast<PipeWireRouter*>(data)->on_metadata_property(key, value);
   return 0;
 }
@@ -907,8 +905,7 @@ auto PipeWireRouter::start(std::string& error) -> bool {
   std::optional<ResolvedKernel> resolved_convolver;
   if (preset_.convolver.has_value() && convolver_disabled_by_env()) {
     log::warn("convolver disabled by EE_EQ_CLI_DISABLE_CONVOLVER");
-    preset_.plugin_order.erase(std::remove(preset_.plugin_order.begin(), preset_.plugin_order.end(), std::string("convolver")),
-                               preset_.plugin_order.end());
+    std::erase(preset_.plugin_order, std::string("convolver"));
     preset_.convolver.reset();
   }
 
@@ -956,18 +953,12 @@ auto PipeWireRouter::start(std::string& error) -> bool {
       log::warn("convolver skipped: " + error);
       error.clear();
       convolver_filter_.reset();
-      preset_.plugin_order.erase(std::remove(preset_.plugin_order.begin(),
-                                             preset_.plugin_order.end(),
-                                             std::string("convolver")),
-                                 preset_.plugin_order.end());
+      std::erase(preset_.plugin_order, std::string("convolver"));
     } else {
       log::info("plugin enabled: convolver");
     }
   } else {
-    preset_.plugin_order.erase(std::remove(preset_.plugin_order.begin(),
-                                           preset_.plugin_order.end(),
-                                           std::string("convolver")),
-                               preset_.plugin_order.end());
+    std::erase(preset_.plugin_order, std::string("convolver"));
   }
 
   if (preset_.limiter.has_value()) {
@@ -1927,8 +1918,7 @@ void PipeWireRouter::on_core_done() {
   }
 }
 
-void PipeWireRouter::on_core_error(int res, const char* message) {
-  (void)res;
+void PipeWireRouter::on_core_error([[maybe_unused]] int res, const char* message) {
   log::error(std::format("PipeWire core error: {}", message));
   if (thread_loop_ != nullptr) {
     pw_thread_loop_signal(thread_loop_, false);

@@ -365,8 +365,7 @@ auto parse_easy_effects_preset(std::string_view bytes, std::string& error) -> Pa
       parsed.convolver = parse_convolver(output, *convolver_key);
     } else {
       parsed.warnings.push_back("convolver requested in plugins_order but no convolver payload was found");
-      parsed.plugin_order.erase(std::remove(parsed.plugin_order.begin(), parsed.plugin_order.end(), "convolver"),
-                                parsed.plugin_order.end());
+      std::erase(parsed.plugin_order, std::string("convolver"));
     }
   }
 
