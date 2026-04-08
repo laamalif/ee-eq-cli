@@ -1,5 +1,6 @@
 #pragma once
 
+#include <atomic>
 #include <memory>
 #include <cstdint>
 #include <chrono>
@@ -13,6 +14,8 @@
 #include <unordered_set>
 #include <vector>
 
+#include <spa/utils/hook.h>
+
 #include "ee_eq_preset_parser.hpp"
 
 struct pw_context;
@@ -22,10 +25,10 @@ struct pw_thread_loop;
 struct pw_proxy;
 struct pw_metadata;
 struct pw_filter;
-struct spa_hook;
 struct spa_dict;
 struct pw_node_info;
 struct pw_core_info;
+struct pw_link_info;
 struct spa_io_position;
 
 namespace ee {
@@ -33,6 +36,11 @@ namespace ee {
 class PipeWireRouter {
  public:
   struct NodeData;
+  struct LinkState {
+    pw_proxy* proxy = nullptr;
+    spa_hook listener{};
+    std::atomic<int> state{0};  // PW_LINK_STATE_INIT == 0; atomic for cross-thread access
+  };
   class EqFilterNode;
   class LimiterFilterNode;
   class ConvolverFilterNode;
@@ -104,7 +112,7 @@ class PipeWireRouter {
 
   std::vector<NodeData*> bound_nodes_;
   std::vector<PortInfo> ports_;
-  std::vector<pw_proxy*> created_links_;
+  std::vector<std::unique_ptr<LinkState>> created_links_;
   std::unordered_set<uint64_t> patched_streams_;
   std::unordered_set<uint64_t> pending_patch_streams_;
   std::unordered_map<uint64_t, PatchAttemptInfo> recent_patch_attempts_;
@@ -135,6 +143,7 @@ class PipeWireRouter {
   void patch_stream(uint64_t node_serial);
   void clear_patched_streams();
   void destroy_links();
+  auto wait_for_links_ready(std::string& error) -> bool;
 
   auto snapshot_nodes() const -> std::vector<NodeInfo>;
   auto snapshot_ports() const -> std::vector<PortInfo>;

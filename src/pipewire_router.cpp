@@ -890,6 +890,18 @@ const pw_proxy_events kNodeProxyEvents = {.version = 0,
 
 const pw_metadata_events kMetadataEvents = {.version = PW_VERSION_METADATA_EVENTS, .property = &on_metadata_property};
 
+void on_link_info(void* data, const pw_link_info* info) {
+  auto* ls = static_cast<PipeWireRouter::LinkState*>(data);
+  if (info != nullptr && (info->change_mask & PW_LINK_CHANGE_MASK_STATE) != 0) {
+    ls->state.store(info->state, std::memory_order_release);
+  }
+}
+
+const pw_link_events kLinkEvents = {
+    .version = PW_VERSION_LINK_EVENTS,
+    .info = &on_link_info,
+};
+
 }  // namespace
 
 PipeWireRouter::PipeWireRouter(ParsedPreset preset, std::string sink_selector)
@@ -979,6 +991,11 @@ auto PipeWireRouter::start(std::string& error) -> bool {
   }
 
   if (!connect_chain(error)) {
+    stop();
+    return false;
+  }
+
+  if (!wait_for_links_ready(error)) {
     stop();
     return false;
   }
@@ -1463,17 +1480,44 @@ void PipeWireRouter::clear_patched_streams() {
 }
 
 void PipeWireRouter::destroy_links() {
-  for (auto* proxy : created_links_) {
-    if (proxy == nullptr || core_ == nullptr || thread_loop_ == nullptr) {
+  for (auto& link : created_links_) {
+    if (link == nullptr || link->proxy == nullptr || core_ == nullptr || thread_loop_ == nullptr) {
       continue;
     }
+    if (link->listener.link.next != nullptr || link->listener.link.prev != nullptr) {
+      spa_hook_remove(&link->listener);
+    }
     pw_thread_loop_lock(thread_loop_);
-    pw_proxy_destroy(proxy);
+    pw_proxy_destroy(link->proxy);
     pw_core_sync(core_, PW_ID_CORE, 0);
     pw_thread_loop_wait(thread_loop_);
     pw_thread_loop_unlock(thread_loop_);
   }
   created_links_.clear();
+}
+
+auto PipeWireRouter::wait_for_links_ready(std::string& error) -> bool {
+  for (int i = 0; i < kStartupPollIterations; ++i) {
+    bool all_ready = true;
+    for (const auto& link : created_links_) {
+      const auto s = link->state.load(std::memory_order_acquire);
+      if (s == PW_LINK_STATE_ERROR) {
+        error = "a chain link entered error state during negotiation";
+        return false;
+      }
+      if (s < PW_LINK_STATE_PAUSED) {
+        all_ready = false;
+        break;
+      }
+    }
+    if (all_ready) {
+      log::info(std::format("all {} chain link(s) negotiated successfully", created_links_.size()));
+      return true;
+    }
+    std::this_thread::sleep_for(std::chrono::milliseconds(1));
+  }
+  error = "timed out waiting for chain links to negotiate";
+  return false;
 }
 
 auto PipeWireRouter::stream_targets_selected_sink(const NodeInfo& node) const -> bool {
@@ -1632,10 +1676,15 @@ auto PipeWireRouter::link_nodes(uint32_t output_node_id, uint32_t input_node_id,
       error = std::format("failed to create PipeWire link {} -> {}", output_node_id, input_node_id);
       return false;
     }
+
+    auto link = std::make_unique<LinkState>();
+    link->proxy = proxy;
+    pw_proxy_add_object_listener(proxy, &link->listener, &kLinkEvents, link.get());
+
     pw_core_sync(core_, PW_ID_CORE, 0);
     pw_thread_loop_wait(thread_loop_);
     pw_thread_loop_unlock(thread_loop_);
-    created_links_.push_back(proxy);
+    created_links_.push_back(std::move(link));
   }
 
   return true;
