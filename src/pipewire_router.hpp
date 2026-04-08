@@ -144,6 +144,7 @@ class PipeWireRouter {
   void clear_patched_streams();
   void destroy_links();
   auto wait_for_links_ready(std::string& error) -> bool;
+  void reconnect_to_sink(const std::string& new_sink_name);
 
   auto snapshot_nodes() const -> std::vector<NodeInfo>;
   auto snapshot_ports() const -> std::vector<PortInfo>;

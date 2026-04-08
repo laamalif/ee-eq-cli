@@ -1520,6 +1520,48 @@ auto PipeWireRouter::wait_for_links_ready(std::string& error) -> bool {
   return false;
 }
 
+void PipeWireRouter::reconnect_to_sink(const std::string& new_sink_name) {
+  if (shutting_down_) {
+    return;
+  }
+
+  auto new_sink = find_node_by_name(new_sink_name);
+  if (!new_sink.has_value()) {
+    log::warn(std::format("default sink changed to {} but node not found; ignoring", new_sink_name));
+    return;
+  }
+
+  log::info(std::format("reconnecting chain to sink: {} (id {}, serial {})",
+                        new_sink->name, new_sink->id, new_sink->serial));
+
+  clear_patched_streams();
+  destroy_links();
+
+  {
+    std::scoped_lock lock(state_mutex_);
+    selected_sink_ = *new_sink;
+  }
+
+  std::string error;
+  if (!wait_for_node_ports(new_sink->id, 2, error)) {
+    log::error(std::format("failed to get ports for new sink {}: {}", new_sink_name, error));
+    return;
+  }
+
+  if (!connect_chain(error)) {
+    log::error(std::format("failed to reconnect chain to {}: {}", new_sink_name, error));
+    return;
+  }
+
+  if (!wait_for_links_ready(error)) {
+    log::error(std::format("chain links failed to negotiate for {}: {}", new_sink_name, error));
+    destroy_links();
+    return;
+  }
+
+  patch_existing_streams();
+}
+
 auto PipeWireRouter::stream_targets_selected_sink(const NodeInfo& node) const -> bool {
   std::scoped_lock lock(state_mutex_);
   if (node.media_class != "Stream/Output/Audio") {
@@ -1946,15 +1988,35 @@ void PipeWireRouter::on_metadata_property(const char* key, const char* value) {
   if (key == nullptr || value == nullptr) {
     return;
   }
-  if (std::string(key) != "default.audio.sink" || startup_sink_locked_) {
+  if (std::string(key) != "default.audio.sink") {
     return;
   }
 
   try {
     const auto parsed = nlohmann::json::parse(value);
     const auto name = parsed.value("name", std::string{});
-    if (!name.empty() && name != kVirtualSinkName) {
+    if (name.empty() || name == kVirtualSinkName) {
+      return;
+    }
+
+    {
+      std::scoped_lock lock(state_mutex_);
+      if (name == selected_sink_.name) {
+        return;
+      }
+    }
+
+    if (!startup_sink_locked_) {
+      std::scoped_lock lock(state_mutex_);
       selected_sink_.name = name;
+      return;
+    }
+
+    if (sink_selector_.empty()) {
+      log::info(std::format("default sink changed to: {}", name));
+      schedule_task(std::chrono::milliseconds(0), [this, name]() {
+        reconnect_to_sink(name);
+      });
     }
   } catch (...) {
   }
