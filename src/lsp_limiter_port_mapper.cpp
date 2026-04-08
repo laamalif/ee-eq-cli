@@ -1,30 +1,13 @@
 #include "lsp_limiter_port_mapper.hpp"
 
-#include <ranges>
-#include <vector>
-
+#include "lsp_labels.hpp"
 #include "math_utils.hpp"
 
 namespace ee {
 
+using namespace ee::labels;
+
 namespace {
-
-const std::vector<std::string> kModeLabels = {"Herm Thin", "Herm Wide", "Herm Tail", "Herm Duck",
-                                              "Exp Thin",  "Exp Wide",  "Exp Tail",  "Exp Duck",
-                                              "Line Thin", "Line Wide", "Line Tail", "Line Duck"};
-const std::vector<std::string> kOversamplingLabels = {
-    "None",          "Half x2/16 bit", "Half x2/24 bit", "Half x3/16 bit", "Half x3/24 bit", "Half x4/16 bit",
-    "Half x4/24 bit","Half x6/16 bit", "Half x6/24 bit", "Half x8/16 bit", "Half x8/24 bit", "Full x2/16 bit",
-    "Full x2/24 bit","Full x3/16 bit", "Full x3/24 bit", "Full x4/16 bit", "Full x4/24 bit", "Full x6/16 bit",
-    "Full x6/24 bit","Full x8/16 bit", "Full x8/24 bit", "True Peak/16 bit","True Peak/24 bit"};
-const std::vector<std::string> kDitheringLabels = {"None", "7bit", "8bit", "11bit", "12bit", "15bit", "16bit",
-                                                   "23bit", "24bit"};
-const std::vector<std::string> kSidechainTypeLabels = {"Internal", "External", "Link"};
-
-auto label_index(const std::vector<std::string>& labels, const std::string& value) -> float {
-  const auto it = std::ranges::find(labels, value);
-  return static_cast<float>(it == labels.end() ? 0 : std::distance(labels.begin(), it));
-}
 
 auto db_port_value(const double db, const bool enforce_lower_bound) -> float {
   if (enforce_lower_bound && db <= -80.01) {
@@ -36,10 +19,10 @@ auto db_port_value(const double db, const bool enforce_lower_bound) -> float {
 }  // namespace
 
 void apply_limiter_preset_to_host(const LimiterPreset& preset, Lv2HostCore& host) {
-  host.set_control_port_value("mode", label_index(kModeLabels, preset.mode));
-  host.set_control_port_value("ovs", label_index(kOversamplingLabels, preset.oversampling));
-  host.set_control_port_value("dith", label_index(kDitheringLabels, preset.dithering));
-  host.set_control_port_value("extsc", label_index(kSidechainTypeLabels, preset.sidechain_type));
+  host.set_control_port_value("mode", label_index(kLimiterModeLabels, preset.mode));
+  host.set_control_port_value("ovs", label_index(kLimiterOversamplingLabels, preset.oversampling));
+  host.set_control_port_value("dith", label_index(kLimiterDitheringLabels, preset.dithering));
+  host.set_control_port_value("extsc", label_index(kLimiterSidechainLabels, preset.sidechain_type));
   host.set_control_port_value("lk", static_cast<float>(preset.lookahead));
   host.set_control_port_value("at", static_cast<float>(preset.attack));
   host.set_control_port_value("rt", static_cast<float>(preset.release));

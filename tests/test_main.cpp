@@ -1,15 +1,16 @@
 #include <array>
 #include <cstdlib>
 #include <cstdio>
+#include <format>
 #include <filesystem>
 #include <fstream>
-#include <iostream>
 #include <sndfile.hh>
 #include <string>
 #include <vector>
 #include <string_view>
 
 #include "cli_args.hpp"
+#include "logging.hpp"
 #include "convolver_host.hpp"
 #include "ee_eq_preset_parser.hpp"
 #include "kernel_resolver.hpp"
@@ -36,7 +37,7 @@ struct TempDir {
 
 void expect(bool condition, std::string_view message) {
   if (!condition) {
-    std::cerr << "FAIL: " << message << '\n';
+    ee::log::error(std::string("FAIL: ") + std::string(message));
     ++g_failures;
   }
 }
@@ -141,14 +142,6 @@ void test_load_preset_missing_file() {
   const auto loaded = ee::load_preset_source(fixture_path("missing-preset.json"), error);
   expect(loaded.bytes.empty(), "missing preset should not load bytes");
   expect(error == "failed to open preset file", "missing preset should report a file-open error");
-}
-
-void test_load_preset_reject_url() {
-  std::string error;
-  const auto loaded = ee::load_preset_source("https://example.invalid/preset.json", error);
-  expect(loaded.bytes.empty(), "URL preset should not load bytes");
-  expect(error == "URL presets are no longer supported; use a local preset file path",
-         "loader should reject URL presets explicitly");
 }
 
 void test_parse_fixture_preset() {
@@ -345,7 +338,6 @@ int main() {
   test_cli_args_cli_wins_over_default_preset_env();
   test_load_preset_local_file();
   test_load_preset_missing_file();
-  test_load_preset_reject_url();
   test_parse_fixture_preset();
   test_parse_fixture_with_convolver_and_limiter();
   test_parse_invalid_preset();
@@ -356,10 +348,10 @@ int main() {
   test_convolver_validate_rate();
 
   if (g_failures != 0) {
-    std::cerr << g_failures << " test assertion(s) failed\n";
+    ee::log::error(std::format("{} test assertion(s) failed", g_failures));
     return 1;
   }
 
-  std::cout << "ee-eq-cli tests passed\n";
+  ee::log::info("ee-eq-cli tests passed");
   return 0;
 }

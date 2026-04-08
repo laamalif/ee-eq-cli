@@ -1,27 +1,14 @@
 #include "lsp_eq_port_mapper.hpp"
 
-#include <ranges>
-#include <vector>
-
+#include "lsp_labels.hpp"
 #include "math_utils.hpp"
 #include "tags_equalizer.hpp"
 
 namespace ee {
 
+using namespace ee::labels;
+
 namespace {
-
-auto label_index(const std::vector<std::string>& labels, const std::string& value) -> float {
-  const auto it = std::ranges::find(labels, value);
-  return static_cast<float>(it == labels.end() ? 0 : std::distance(labels.begin(), it));
-}
-
-const std::vector<std::string> kModeLabels = {"IIR", "FIR", "FFT", "SPM"};
-const std::vector<std::string> kBandModeLabels = {"RLC (BT)", "RLC (MT)", "BWC (BT)", "BWC (MT)",
-                                                  "LRX (BT)", "LRX (MT)", "APO (DR)"};
-const std::vector<std::string> kBandTypeLabels = {"Off",        "Bell",       "Hi-pass",    "Hi-shelf",
-                                                  "Lo-pass",    "Lo-shelf",   "Notch",      "Resonance",
-                                                  "Allpass",    "Bandpass",   "Ladder-pass","Ladder-rej"};
-const std::vector<std::string> kBandSlopeLabels = {"x1", "x2", "x3", "x4"};
 
 void apply_channel(const std::array<EqBand, 32>& bands,
                    const auto& type_ports,
@@ -50,7 +37,7 @@ void apply_channel(const std::array<EqBand, 32>& bands,
 }  // namespace
 
 void apply_eq_preset_to_host(const EqPreset& preset, Lv2HostCore& host) {
-  host.set_control_port_value("mode", label_index(kModeLabels, preset.mode));
+  host.set_control_port_value("mode", label_index(kEqModeLabels, preset.mode));
   host.set_control_port_value("bal", static_cast<float>(preset.balance));
   host.set_control_port_value("frqs_l", static_cast<float>(preset.pitch_left));
   host.set_control_port_value("frqs_r", static_cast<float>(preset.pitch_right));
