@@ -980,7 +980,6 @@ auto PipeWireRouter::start(std::string& error) -> bool {
   }
 
   patch_existing_streams();
-  started_ = true;
   return true;
 }
 
@@ -1816,7 +1815,6 @@ void PipeWireRouter::on_node_proxy_removed(NodeData* data) {
   }
 
   pw_proxy* proxy = nullptr;
-  uint64_t removed_stream_serial = 0;
   {
     std::scoped_lock lock(state_mutex_);
     data->removed = true;
@@ -1850,10 +1848,6 @@ void PipeWireRouter::on_node_proxy_removed(NodeData* data) {
         recent_patch_attempts_.erase(it);
       }
 
-      if (data->info->media_class == "Stream/Output/Audio") {
-        removed_stream_serial = data->info->serial != 0 ? data->info->serial : data->info->id;
-      }
-
       log::info(std::format("stream/node removed: {} (id {}, serial {})",
                             data->info->name,
                             data->info->id,
@@ -1874,7 +1868,7 @@ void PipeWireRouter::on_node_proxy_removed(NodeData* data) {
 
   schedule_task(
       std::chrono::milliseconds(0),
-      [this, proxy, removed_stream_serial]() {
+      [this, proxy]() {
         // Do not clear per-stream metadata here. PipeWire can recycle node ids
         // immediately across remove/recreate cycles, and stale cleanup on a
         // reused id is riskier than leaving metadata for a vanished stream.

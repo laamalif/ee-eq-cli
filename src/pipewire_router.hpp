@@ -92,7 +92,6 @@ class PipeWireRouter {
 
   ParsedPreset preset_;
   std::string sink_selector_;
-  bool started_ = false;
   bool shutting_down_ = false;
   bool startup_sink_locked_ = false;
 
