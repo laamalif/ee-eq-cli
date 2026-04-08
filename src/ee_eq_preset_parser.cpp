@@ -19,36 +19,36 @@ using namespace ee::labels;
 
 namespace {
 
-constexpr int kMaxBands = 32;
+constexpr size_t kMaxBands = 32;
 
-auto default_band_frequencies(const int num_bands) -> std::array<double, kMaxBands> {
+auto default_band_frequencies(const size_t num_bands) -> std::array<double, kMaxBands> {
   std::array<double, kMaxBands> values{};
   constexpr double min_freq = 20.0;
   constexpr double max_freq = 20000.0;
 
   double freq0 = min_freq;
   const double step = std::pow(max_freq / min_freq, 1.0 / static_cast<double>(num_bands));
-  for (int i = 0; i < num_bands; ++i) {
+  for (size_t i = 0; i < num_bands; ++i) {
     const double freq1 = freq0 * step;
     values[i] = freq0 + (0.5 * (freq1 - freq0));
     freq0 = freq1;
   }
 
-  for (int i = num_bands; i < kMaxBands; ++i) {
-    values[i] = values[std::max(0, num_bands - 1)];
+  for (size_t i = num_bands; i < kMaxBands; ++i) {
+    values[i] = values[num_bands > 0 ? num_bands - 1 : 0];
   }
 
   return values;
 }
 
-auto default_band_qs(const int num_bands) -> std::array<double, kMaxBands> {
+auto default_band_qs(const size_t num_bands) -> std::array<double, kMaxBands> {
   std::array<double, kMaxBands> values{};
   constexpr double min_freq = 20.0;
   constexpr double max_freq = 20000.0;
 
   double freq0 = min_freq;
   const double step = std::pow(max_freq / min_freq, 1.0 / static_cast<double>(num_bands));
-  for (int i = 0; i < num_bands; ++i) {
+  for (size_t i = 0; i < num_bands; ++i) {
     const double freq1 = freq0 * step;
     const double freq = freq0 + (0.5 * (freq1 - freq0));
     const double width = freq1 - freq0;
@@ -56,8 +56,8 @@ auto default_band_qs(const int num_bands) -> std::array<double, kMaxBands> {
     freq0 = freq1;
   }
 
-  for (int i = num_bands; i < kMaxBands; ++i) {
-    values[i] = values[std::max(0, num_bands - 1)];
+  for (size_t i = num_bands; i < kMaxBands; ++i) {
+    values[i] = values[num_bands > 0 ? num_bands - 1 : 0];
   }
 
   return values;
@@ -299,20 +299,21 @@ auto parse_easy_effects_preset(std::string_view bytes, std::string& error) -> Pa
     return {};
   }
 
-  preset.num_bands = std::clamp(eq.value("num-bands", preset.num_bands), 1, kMaxBands);
+  preset.num_bands = std::clamp(eq.value("num-bands", preset.num_bands), 1, static_cast<int>(kMaxBands));
   preset.split_channels = eq.value("split-channels", false);
   preset.balance = eq.value("balance", 0.0);
   preset.pitch_left = eq.value("pitch-left", 0.0);
   preset.pitch_right = eq.value("pitch-right", 0.0);
 
-  const auto default_freq = default_band_frequencies(preset.num_bands);
-  const auto default_q = default_band_qs(preset.num_bands);
+  const auto num_bands = static_cast<size_t>(preset.num_bands);
+  const auto default_freq = default_band_frequencies(num_bands);
+  const auto default_q = default_band_qs(num_bands);
 
-  for (int i = 0; i < kMaxBands; ++i) {
+  for (size_t i = 0; i < kMaxBands; ++i) {
     auto defaults = band_default();
     defaults.frequency = default_freq[i];
     defaults.q = default_q[i];
-    if (i >= preset.num_bands) {
+    if (i >= num_bands) {
       defaults.type = "Off";
     }
 
@@ -330,7 +331,7 @@ auto parse_easy_effects_preset(std::string_view bytes, std::string& error) -> Pa
     return {};
   }
 
-  for (int i = 0; i < kMaxBands; ++i) {
+  for (size_t i = 0; i < kMaxBands; ++i) {
     const auto band_key = std::format("band{}", i);
     preset.left[i] = parse_band(eq.at("left"), band_key, preset.left[i], error);
     if (!error.empty()) {
