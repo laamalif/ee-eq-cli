@@ -471,6 +471,223 @@ void test_cli_args_missing_sink_value() {
   expect(error == "missing value for --sink", "missing --sink value should produce the expected error");
 }
 
+// --- Parser edge cases ---
+
+constexpr auto kIrsFixtureName = "Razor Surround ((48k Z-Edition)) 2.Stereo +20 bass Low Latency";
+
+auto minimal_eq_json(std::string_view plugins_order_fragment,
+                     std::string_view extra_output_fields = "") -> std::string {
+  return std::format(R"({{
+    "output": {{
+      "plugins_order": [{}],
+      "equalizer": {{
+        "mode": "IIR", "num-bands": 2, "split-channels": false,
+        "left": {{}}, "right": {{}}
+      }}{}
+    }}
+  }})", plugins_order_fragment, extra_output_fields);
+}
+
+void test_parse_missing_output_section() {
+  std::string error;
+  const auto parsed = ee::parse_easy_effects_preset("{}", error);
+  expect(error == "missing output section", "missing output should produce the expected error");
+}
+
+void test_parse_missing_plugins_order() {
+  constexpr std::string_view json = R"({"output": {"equalizer": {}}})";
+  std::string error;
+  const auto parsed = ee::parse_easy_effects_preset(json, error);
+  expect(error == "missing output.plugins_order", "missing plugins_order should produce the expected error");
+}
+
+void test_parse_empty_plugins_order() {
+  constexpr std::string_view json = R"({"output": {"plugins_order": []}})";
+  std::string error;
+  const auto parsed = ee::parse_easy_effects_preset(json, error);
+  expect(error == "empty output.plugins_order is not supported", "empty plugins_order should produce the expected error");
+}
+
+void test_parse_no_equalizer_in_plugins() {
+  constexpr std::string_view json = R"({
+    "output": {
+      "plugins_order": ["limiter"],
+      "limiter": {}
+    }
+  })";
+  std::string error;
+  const auto parsed = ee::parse_easy_effects_preset(json, error);
+  expect(error == "equalizer is required in output.plugins_order",
+         "plugins_order without equalizer should produce the expected error");
+}
+
+void test_parse_unsupported_plugin_warning() {
+  const auto json = minimal_eq_json(R"("equalizer", "compressor")");
+  std::string error;
+  const auto parsed = ee::parse_easy_effects_preset(json, error);
+  expect(error.empty(), "unsupported plugin should not cause a hard error");
+  expect(parsed.warnings.size() == 1, "unsupported plugin should produce exactly one warning");
+  expect(!parsed.warnings.empty() && parsed.warnings[0] == "skipping unsupported plugin: compressor",
+         "unsupported plugin warning should name the plugin");
+}
+
+void test_parse_num_bands_clamped_high() {
+  const auto json = std::format(R"({{
+    "output": {{
+      "plugins_order": ["equalizer"],
+      "equalizer": {{
+        "mode": "IIR", "num-bands": 99, "split-channels": false,
+        "left": {{}}, "right": {{}}
+      }}
+    }}
+  }})");
+  std::string error;
+  const auto parsed = ee::parse_easy_effects_preset(json, error);
+  expect(error.empty(), "num-bands 99 should not error");
+  expect(parsed.equalizer.num_bands == 32, "num-bands 99 should be clamped to 32");
+}
+
+void test_parse_num_bands_clamped_low() {
+  const auto json = std::format(R"({{
+    "output": {{
+      "plugins_order": ["equalizer"],
+      "equalizer": {{
+        "mode": "IIR", "num-bands": 0, "split-channels": false,
+        "left": {{}}, "right": {{}}
+      }}
+    }}
+  }})");
+  std::string error;
+  const auto parsed = ee::parse_easy_effects_preset(json, error);
+  expect(error.empty(), "num-bands 0 should not error");
+  expect(parsed.equalizer.num_bands == 1, "num-bands 0 should be clamped to 1");
+}
+
+void test_parse_split_channels() {
+  constexpr std::string_view json = R"({
+    "output": {
+      "plugins_order": ["equalizer"],
+      "equalizer": {
+        "mode": "IIR", "num-bands": 2, "split-channels": true,
+        "left": { "band0": { "gain": 5.0 } },
+        "right": { "band0": { "gain": -3.0 } }
+      }
+    }
+  })";
+  std::string error;
+  const auto parsed = ee::parse_easy_effects_preset(json, error);
+  expect(error.empty(), "split-channels preset should parse");
+  expect(parsed.equalizer.split_channels, "split-channels should be true");
+  expect(parsed.equalizer.left[0].gain_db == 5.0, "left band0 gain should be 5.0");
+  expect(parsed.equalizer.right[0].gain_db == -3.0, "right band0 gain should be -3.0");
+}
+
+// --- Convolver tests with real IRS ---
+
+void test_convolver_load_real_irs() {
+  const auto irs_path = fixture_path(std::string(kIrsFixtureName) + ".irs");
+  ee::ResolvedKernel kernel{.name = kIrsFixtureName, .path = irs_path, .is_sofa = false};
+  ee::ConvolverPreset preset;
+  ee::ConvolverHost host;
+  std::string error;
+
+  expect(host.load(preset, kernel, error), "real IRS fixture should load");
+  expect(error.empty(), "real IRS fixture should load without error");
+
+  error.clear();
+  expect(host.validate_rate(48000, error), "real IRS at 48kHz should accept 48kHz stream rate");
+  expect(error.empty(), "matching rate should not produce an error");
+}
+
+void test_convolver_process_round_trip() {
+  const auto irs_path = fixture_path(std::string(kIrsFixtureName) + ".irs");
+  ee::ResolvedKernel kernel{.name = kIrsFixtureName, .path = irs_path, .is_sofa = false};
+  ee::ConvolverPreset preset;
+  ee::ConvolverHost host;
+  std::string error;
+
+  expect(host.load(preset, kernel, error), "IRS should load for process test");
+  expect(host.ensure_ready(256), "convolver should become ready with block size 256");
+
+  std::vector<float> left(256, 0.0F);
+  std::vector<float> right(256, 0.0F);
+  left[0] = 1.0F;
+  right[0] = 1.0F;
+
+  expect(host.process(left, right), "convolver process should succeed");
+
+  float energy = 0.0F;
+  for (size_t i = 0; i < 256; ++i) {
+    energy += left[i] * left[i] + right[i] * right[i];
+  }
+  expect(energy > 0.0F, "convolver output should contain non-zero energy after impulse input");
+}
+
+void test_convolver_process_wrong_block_size() {
+  const auto irs_path = fixture_path(std::string(kIrsFixtureName) + ".irs");
+  ee::ResolvedKernel kernel{.name = kIrsFixtureName, .path = irs_path, .is_sofa = false};
+  ee::ConvolverPreset preset;
+  ee::ConvolverHost host;
+  std::string error;
+
+  expect(host.load(preset, kernel, error), "IRS should load for block size mismatch test");
+  expect(host.ensure_ready(256), "convolver should become ready with block size 256");
+
+  std::vector<float> left(512, 0.0F);
+  std::vector<float> right(512, 0.0F);
+  expect(!host.process(left, right), "process with wrong block size should fail");
+}
+
+// --- Kernel resolver with real IRS ---
+
+void test_resolve_kernel_real_irs() {
+  const auto temp_dir = make_temp_dir();
+  expect(temp_dir.is_valid(), "temp dir for real IRS resolver test should be created");
+  if (!temp_dir.is_valid()) {
+    return;
+  }
+
+  const auto ir_dir = resolver_ir_dir(temp_dir);
+  expect(std::filesystem::create_directories(ir_dir), "IR directory should be created");
+
+  const auto src = fixture_path(std::string(kIrsFixtureName) + ".irs");
+  const auto dst = ir_dir / (std::string(kIrsFixtureName) + ".irs");
+  std::filesystem::copy_file(src, dst);
+
+  ee::ConvolverPreset preset;
+  preset.kernel_name = kIrsFixtureName;
+  std::string warning;
+  const auto resolved = ee::resolve_convolver_kernel(preset, warning);
+  expect(resolved.has_value(), "real IRS should resolve by exact name");
+  expect(warning.empty(), "exact real IRS match should not warn");
+  expect(resolved.has_value() && resolved->name == kIrsFixtureName, "resolved name should match");
+  expect(resolved.has_value() && resolved->path == dst.string(), "resolved path should point to the copied IRS");
+}
+
+void test_resolve_kernel_name_from_path() {
+  const auto temp_dir = make_temp_dir();
+  expect(temp_dir.is_valid(), "temp dir for kernel-path resolver test should be created");
+  if (!temp_dir.is_valid()) {
+    return;
+  }
+
+  const auto ir_dir = resolver_ir_dir(temp_dir);
+  expect(std::filesystem::create_directories(ir_dir), "IR directory should be created");
+
+  const auto src = fixture_path(std::string(kIrsFixtureName) + ".irs");
+  const auto dst = ir_dir / (std::string(kIrsFixtureName) + ".irs");
+  std::filesystem::copy_file(src, dst);
+
+  ee::ConvolverPreset preset;
+  preset.kernel_path = "/some/old/path/" + std::string(kIrsFixtureName) + ".irs";
+  std::string warning;
+  const auto resolved = ee::resolve_convolver_kernel(preset, warning);
+  expect(resolved.has_value(), "kernel_path stem should resolve when IRS exists locally");
+  expect(warning.empty(), "kernel_path exact match should not warn");
+  expect(resolved.has_value() && resolved->name == kIrsFixtureName,
+         "resolved name should be derived from kernel_path stem");
+}
+
 }  // namespace
 
 int main() {
@@ -513,6 +730,22 @@ int main() {
   test_cli_args_unknown_option();
   test_cli_args_missing_preset_value();
   test_cli_args_missing_sink_value();
+
+  test_parse_missing_output_section();
+  test_parse_missing_plugins_order();
+  test_parse_empty_plugins_order();
+  test_parse_no_equalizer_in_plugins();
+  test_parse_unsupported_plugin_warning();
+  test_parse_num_bands_clamped_high();
+  test_parse_num_bands_clamped_low();
+  test_parse_split_channels();
+
+  test_convolver_load_real_irs();
+  test_convolver_process_round_trip();
+  test_convolver_process_wrong_block_size();
+
+  test_resolve_kernel_real_irs();
+  test_resolve_kernel_name_from_path();
 
   if (g_failures != 0) {
     ee::log::error(std::format("{} test assertion(s) failed", g_failures));
