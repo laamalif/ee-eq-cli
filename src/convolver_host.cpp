@@ -52,11 +52,12 @@ auto ConvolverHost::load_kernel_file(const ResolvedKernel& kernel, std::string& 
 
   data.rate = static_cast<uint32_t>(sndfile.samplerate());
   data.channels = sndfile.channels() == 1 ? 2U : static_cast<uint32_t>(sndfile.channels());
-  data.left.resize(sndfile.frames());
-  data.right.resize(sndfile.frames());
+  const auto n_frames = static_cast<size_t>(sndfile.frames());
+  data.left.resize(n_frames);
+  data.right.resize(n_frames);
   if (data.channels == 4) {
-    data.left_right.resize(sndfile.frames());
-    data.right_left.resize(sndfile.frames());
+    data.left_right.resize(n_frames);
+    data.right_left.resize(n_frames);
   }
 
   for (size_t i = 0; i < static_cast<size_t>(sndfile.frames()); ++i) {
@@ -178,7 +179,7 @@ auto ConvolverHost::ensure_ready(uint32_t block_size) -> bool {
   block_size_ = block_size;
   conv_->set_options(0);
 
-  if (conv_->configure(2, 2, kernel_.left.size(), block_size, block_size, Convproc::MAXPART, 0.5F) != 0) {
+  if (conv_->configure(2, 2, static_cast<uint32_t>(kernel_.left.size()), block_size, block_size, Convproc::MAXPART, 0.5F) != 0) {
     return false;
   }
 
