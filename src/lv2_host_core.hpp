@@ -100,6 +100,11 @@ class Lv2HostCore {
     } out;
   } audio_ports_{};
 
+  LV2_Log_Log lv2_log_{};
+  LV2_URID_Map lv2_map_{};
+  LV2_URID_Unmap lv2_unmap_{};
+  std::array<LV2_Options_Option, 5> lv2_options_{};
+
   void check_required_features();
   void create_ports();
   void connect_control_ports();
