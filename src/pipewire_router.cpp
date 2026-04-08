@@ -56,6 +56,8 @@ constexpr int kStartupPollIterations = 5000;
 constexpr auto kRapidRemovalWindow = std::chrono::milliseconds(1500);
 constexpr auto kLoopSuppressDuration = std::chrono::seconds(5);
 constexpr auto kLoopSuppressThreshold = 3;
+constexpr auto kMediaClassAudioSink = "Audio/Sink";
+constexpr auto kMediaClassStreamOutputAudio = "Stream/Output/Audio";
 
 struct FilterPort {
   void* data = nullptr;
@@ -1044,7 +1046,7 @@ auto PipeWireRouter::list_sinks(std::string& error) -> std::vector<std::string> 
   pw_thread_loop_unlock(thread_loop_);
 
   for (const auto& node : snapshot_nodes()) {
-    if (node.media_class == "Audio/Sink" && node.name != kVirtualSinkName) {
+    if (node.media_class == kMediaClassAudioSink && node.name != kVirtualSinkName) {
       result.push_back(std::format("{} [serial {}]", node.name, node.serial));
     }
   }
@@ -1326,7 +1328,7 @@ auto PipeWireRouter::wait_for_node_ports(uint32_t node_id, uint32_t minimum_port
 void PipeWireRouter::create_virtual_sink(std::string& error) {
   pw_properties* props = pw_properties_new(nullptr, nullptr);
   pw_properties_set(props, PW_KEY_APP_ID, kAppId);
-  pw_properties_set(props, PW_KEY_MEDIA_CLASS, "Audio/Sink");
+  pw_properties_set(props, PW_KEY_MEDIA_CLASS, kMediaClassAudioSink);
   pw_properties_set(props, PW_KEY_NODE_NAME, kVirtualSinkName);
   pw_properties_set(props, PW_KEY_NODE_DESCRIPTION, kVirtualSinkDescription);
   pw_properties_set(props, PW_KEY_NODE_VIRTUAL, "true");
@@ -1392,7 +1394,7 @@ void PipeWireRouter::patch_existing_streams() {
   {
     std::scoped_lock lock(state_mutex_);
     for (const auto& node : bound_nodes_) {
-      if (node != nullptr && node->info != nullptr && node->info->media_class == "Stream/Output/Audio" &&
+      if (node != nullptr && node->info != nullptr && node->info->media_class == kMediaClassStreamOutputAudio &&
           stream_targets_selected_sink(*node->info)) {
         serials_to_patch.push_back(node->info->serial != 0 ? node->info->serial : node->info->id);
       }
@@ -1604,7 +1606,7 @@ void PipeWireRouter::reconnect_to_sink(const std::string& new_sink_name) {
 
 auto PipeWireRouter::stream_targets_selected_sink(const NodeInfo& node) const -> bool {
   std::scoped_lock lock(state_mutex_);
-  if (node.media_class != "Stream/Output/Audio") {
+  if (node.media_class != kMediaClassStreamOutputAudio) {
     return false;
   }
 
@@ -1903,7 +1905,7 @@ void PipeWireRouter::on_node_info(NodeData* data, const pw_node_info* info) {
     virtual_sink_ = *data->info;
   }
 
-  if (data->info->media_class == "Stream/Output/Audio") {
+  if (data->info->media_class == kMediaClassStreamOutputAudio) {
     const auto target = data->info->target_object.empty() ? std::string("<default>") : data->info->target_object;
     if (!data->observation_logged || data->last_logged_target != target) {
       log::info(std::format("stream observed: {} (id {}, serial {}, target {})",
@@ -1916,7 +1918,7 @@ void PipeWireRouter::on_node_info(NodeData* data, const pw_node_info* info) {
     }
   }
 
-  if (startup_sink_locked_ && data->info->media_class == "Stream/Output/Audio" && stream_targets_selected_sink(*data->info)) {
+  if (startup_sink_locked_ && data->info->media_class == kMediaClassStreamOutputAudio && stream_targets_selected_sink(*data->info)) {
     const auto node_serial = data->info->serial != 0 ? data->info->serial : data->info->id;
     const auto loop_key = data->info->name;
     const auto now = std::chrono::steady_clock::now();
