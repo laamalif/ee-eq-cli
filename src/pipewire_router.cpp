@@ -1057,13 +1057,20 @@ void PipeWireRouter::stop() {
     virtual_sink_proxy_ = nullptr;
   }
 
-  for (auto* node : bound_nodes_) {
+  std::vector<NodeData*> nodes_snapshot;
+  {
+    std::scoped_lock lock(state_mutex_);
+    nodes_snapshot = std::move(bound_nodes_);
+  }
+  for (auto* node : nodes_snapshot) {
+    if (node == nullptr) {
+      continue;
+    }
     free_node_info(node);
-    if (node != nullptr &&
-        (node->proxy_listener.link.next != nullptr || node->proxy_listener.link.prev != nullptr)) {
+    if (node->proxy_listener.link.next != nullptr || node->proxy_listener.link.prev != nullptr) {
       spa_hook_remove(&node->proxy_listener);
     }
-    if (node != nullptr && node->proxy != nullptr) {
+    if (node->proxy != nullptr) {
       pw_thread_loop_lock(thread_loop_);
       pw_proxy_destroy(node->proxy);
       pw_core_sync(core_, PW_ID_CORE, 0);
@@ -1071,7 +1078,6 @@ void PipeWireRouter::stop() {
       pw_thread_loop_unlock(thread_loop_);
     }
   }
-  bound_nodes_.clear();
 
   if (metadata_ != nullptr) {
     pw_thread_loop_lock(thread_loop_);
