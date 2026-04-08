@@ -233,7 +233,7 @@ class PipeWireRouter::EqFilterNode {
 
   static void on_process(void* userdata, spa_io_position* position) {
     auto* self = static_cast<EqFilterNode*>(userdata);
-    const auto n_samples = position->clock.duration;
+    const auto n_samples = static_cast<uint32_t>(position->clock.duration);
     const auto rate = position->clock.rate.denom;
     if (n_samples == 0 || rate == 0) {
       return;
@@ -470,7 +470,7 @@ class PipeWireRouter::LimiterFilterNode {
 
   static void on_process(void* userdata, spa_io_position* position) {
     auto* self = static_cast<LimiterFilterNode*>(userdata);
-    const auto n_samples = position->clock.duration;
+    const auto n_samples = static_cast<uint32_t>(position->clock.duration);
     const auto rate = position->clock.rate.denom;
     if (n_samples == 0 || rate == 0) {
       return;
@@ -712,7 +712,7 @@ class PipeWireRouter::ConvolverFilterNode {
 
   static void on_process(void* userdata, spa_io_position* position) {
     auto* self = static_cast<ConvolverFilterNode*>(userdata);
-    const auto n_samples = position->clock.duration;
+    const auto n_samples = static_cast<uint32_t>(position->clock.duration);
     const auto rate = position->clock.rate.denom;
     if (n_samples == 0 || rate == 0) {
       return;
