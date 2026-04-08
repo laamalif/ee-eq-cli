@@ -179,14 +179,14 @@ class PipeWireRouter::EqFilterNode {
     pw_thread_loop_wait(thread_loop_);
     pw_thread_loop_unlock(thread_loop_);
 
-    for (int i = 0; i < kStartupPollIterations && !can_get_node_id_; ++i) {
+    for (int i = 0; i < kStartupPollIterations && !can_get_node_id_.load(std::memory_order_acquire); ++i) {
       std::this_thread::sleep_for(std::chrono::milliseconds(1));
-      if (state_ == PW_FILTER_STATE_ERROR) {
+      if (state_.load(std::memory_order_acquire) == PW_FILTER_STATE_ERROR) {
         error = "EQ filter entered PipeWire error state";
         return false;
       }
     }
-    if (!can_get_node_id_) {
+    if (!can_get_node_id_.load(std::memory_order_acquire)) {
       error = "timed out waiting for EQ filter node to become usable";
       return false;
     }
@@ -223,8 +223,9 @@ class PipeWireRouter::EqFilterNode {
                                       pw_filter_state state,
                                       [[maybe_unused]] const char* error) {
     auto* self = static_cast<EqFilterNode*>(userdata);
-    self->state_ = state;
-    self->can_get_node_id_ = (state == PW_FILTER_STATE_STREAMING || state == PW_FILTER_STATE_PAUSED);
+    self->state_.store(state, std::memory_order_release);
+    self->can_get_node_id_.store(state == PW_FILTER_STATE_STREAMING || state == PW_FILTER_STATE_PAUSED,
+                                std::memory_order_release);
   }
 
   static void on_process(void* userdata, spa_io_position* position) {
@@ -264,24 +265,27 @@ class PipeWireRouter::EqFilterNode {
     std::ranges::copy(left_in, self->scratch_left_.begin());
     std::ranges::copy(right_in, self->scratch_right_.begin());
 
+    const auto out_gain = self->output_gain_.load(std::memory_order_relaxed);
+    const auto in_gain = self->input_gain_.load(std::memory_order_relaxed);
+
     if (!self->ready_) {
       std::ranges::copy(self->scratch_left_, left_out.begin());
       std::ranges::copy(self->scratch_right_, right_out.begin());
-      if (self->output_gain_ != 1.0F) {
-        self->apply_gain(left_out, right_out, self->output_gain_);
+      if (out_gain != 1.0F) {
+        self->apply_gain(left_out, right_out, out_gain);
       }
       return;
     }
 
-    if (self->input_gain_ != 1.0F) {
-      self->apply_gain(self->scratch_left_, self->scratch_right_, self->input_gain_);
+    if (in_gain != 1.0F) {
+      self->apply_gain(self->scratch_left_, self->scratch_right_, in_gain);
     }
 
     self->host_.connect_audio_ports(self->scratch_left_, self->scratch_right_, left_out, right_out);
     self->host_.run();
 
-    if (self->output_gain_ != 1.0F) {
-      self->apply_gain(left_out, right_out, self->output_gain_);
+    if (out_gain != 1.0F) {
+      self->apply_gain(left_out, right_out, out_gain);
     }
   }
 
@@ -319,10 +323,10 @@ class PipeWireRouter::EqFilterNode {
   uint32_t rate_ = 0;
   uint32_t n_samples_ = 0;
   bool ready_ = false;
-  bool can_get_node_id_ = false;
-  pw_filter_state state_ = PW_FILTER_STATE_UNCONNECTED;
-  float input_gain_ = static_cast<float>(ee::math::db_to_linear(preset_.input_gain_db));
-  float output_gain_ = static_cast<float>(ee::math::db_to_linear(preset_.output_gain_db));
+  std::atomic<bool> can_get_node_id_{false};
+  std::atomic<pw_filter_state> state_{PW_FILTER_STATE_UNCONNECTED};
+  std::atomic<float> input_gain_{static_cast<float>(ee::math::db_to_linear(preset_.input_gain_db))};
+  std::atomic<float> output_gain_{static_cast<float>(ee::math::db_to_linear(preset_.output_gain_db))};
   std::vector<float> scratch_left_;
   std::vector<float> scratch_right_;
   std::vector<float> dummy_left_;
@@ -411,14 +415,14 @@ class PipeWireRouter::LimiterFilterNode {
     pw_thread_loop_wait(thread_loop_);
     pw_thread_loop_unlock(thread_loop_);
 
-    for (int i = 0; i < kStartupPollIterations && !can_get_node_id_; ++i) {
+    for (int i = 0; i < kStartupPollIterations && !can_get_node_id_.load(std::memory_order_acquire); ++i) {
       std::this_thread::sleep_for(std::chrono::milliseconds(1));
-      if (state_ == PW_FILTER_STATE_ERROR) {
+      if (state_.load(std::memory_order_acquire) == PW_FILTER_STATE_ERROR) {
         error = "Limiter filter entered PipeWire error state";
         return false;
       }
     }
-    if (!can_get_node_id_) {
+    if (!can_get_node_id_.load(std::memory_order_acquire)) {
       error = "timed out waiting for limiter filter node to become usable";
       return false;
     }
@@ -455,8 +459,9 @@ class PipeWireRouter::LimiterFilterNode {
                                       pw_filter_state state,
                                       [[maybe_unused]] const char* error) {
     auto* self = static_cast<LimiterFilterNode*>(userdata);
-    self->state_ = state;
-    self->can_get_node_id_ = (state == PW_FILTER_STATE_STREAMING || state == PW_FILTER_STATE_PAUSED);
+    self->state_.store(state, std::memory_order_release);
+    self->can_get_node_id_.store(state == PW_FILTER_STATE_STREAMING || state == PW_FILTER_STATE_PAUSED,
+                                std::memory_order_release);
   }
 
   static void on_process(void* userdata, spa_io_position* position) {
@@ -502,24 +507,27 @@ class PipeWireRouter::LimiterFilterNode {
     std::ranges::copy(left_in, self->scratch_left_.begin());
     std::ranges::copy(right_in, self->scratch_right_.begin());
 
+    const auto out_gain = self->output_gain_.load(std::memory_order_relaxed);
+    const auto in_gain = self->input_gain_.load(std::memory_order_relaxed);
+
     if (!self->ready_) {
       std::ranges::copy(self->scratch_left_, left_out.begin());
       std::ranges::copy(self->scratch_right_, right_out.begin());
-      if (self->output_gain_ != 1.0F) {
-        self->apply_gain(left_out, right_out, self->output_gain_);
+      if (out_gain != 1.0F) {
+        self->apply_gain(left_out, right_out, out_gain);
       }
       return;
     }
 
-    if (self->input_gain_ != 1.0F) {
-      self->apply_gain(self->scratch_left_, self->scratch_right_, self->input_gain_);
+    if (in_gain != 1.0F) {
+      self->apply_gain(self->scratch_left_, self->scratch_right_, in_gain);
     }
 
     self->host_.connect_audio_ports(self->scratch_left_, self->scratch_right_, left_out, right_out, side_left, side_right);
     self->host_.run();
 
-    if (self->output_gain_ != 1.0F) {
-      self->apply_gain(left_out, right_out, self->output_gain_);
+    if (out_gain != 1.0F) {
+      self->apply_gain(left_out, right_out, out_gain);
     }
   }
 
@@ -559,10 +567,10 @@ class PipeWireRouter::LimiterFilterNode {
   uint32_t rate_ = 0;
   uint32_t n_samples_ = 0;
   bool ready_ = false;
-  bool can_get_node_id_ = false;
-  pw_filter_state state_ = PW_FILTER_STATE_UNCONNECTED;
-  float input_gain_ = static_cast<float>(ee::math::db_to_linear(preset_.input_gain_db));
-  float output_gain_ = static_cast<float>(ee::math::db_to_linear(preset_.output_gain_db));
+  std::atomic<bool> can_get_node_id_{false};
+  std::atomic<pw_filter_state> state_{PW_FILTER_STATE_UNCONNECTED};
+  std::atomic<float> input_gain_{static_cast<float>(ee::math::db_to_linear(preset_.input_gain_db))};
+  std::atomic<float> output_gain_{static_cast<float>(ee::math::db_to_linear(preset_.output_gain_db))};
   std::vector<float> scratch_left_;
   std::vector<float> scratch_right_;
   std::vector<float> dummy_left_;
@@ -649,14 +657,14 @@ class PipeWireRouter::ConvolverFilterNode {
     pw_thread_loop_wait(thread_loop_);
     pw_thread_loop_unlock(thread_loop_);
 
-    for (int i = 0; i < kStartupPollIterations && !can_get_node_id_; ++i) {
+    for (int i = 0; i < kStartupPollIterations && !can_get_node_id_.load(std::memory_order_acquire); ++i) {
       std::this_thread::sleep_for(std::chrono::milliseconds(1));
-      if (state_ == PW_FILTER_STATE_ERROR) {
+      if (state_.load(std::memory_order_acquire) == PW_FILTER_STATE_ERROR) {
         error = "Convolver filter entered PipeWire error state";
         return false;
       }
     }
-    if (!can_get_node_id_) {
+    if (!can_get_node_id_.load(std::memory_order_acquire)) {
       error = "timed out waiting for convolver filter node to become usable";
       return false;
     }
@@ -692,8 +700,9 @@ class PipeWireRouter::ConvolverFilterNode {
                                       pw_filter_state state,
                                       [[maybe_unused]] const char* error) {
     auto* self = static_cast<ConvolverFilterNode*>(userdata);
-    self->state_ = state;
-    self->can_get_node_id_ = (state == PW_FILTER_STATE_STREAMING || state == PW_FILTER_STATE_PAUSED);
+    self->state_.store(state, std::memory_order_release);
+    self->can_get_node_id_.store(state == PW_FILTER_STATE_STREAMING || state == PW_FILTER_STATE_PAUSED,
+                                std::memory_order_release);
   }
 
   static void on_process(void* userdata, spa_io_position* position) {
@@ -726,13 +735,18 @@ class PipeWireRouter::ConvolverFilterNode {
       return;
     }
 
+    const auto in_gain = self->input_gain_.load(std::memory_order_relaxed);
+    const auto out_gain = self->output_gain_.load(std::memory_order_relaxed);
+    const auto dry = self->dry_.load(std::memory_order_relaxed);
+    const auto wet = self->wet_.load(std::memory_order_relaxed);
+
     self->input_left_.resize(n_samples);
     self->input_right_.resize(n_samples);
     std::ranges::copy(left_in, self->input_left_.begin());
     std::ranges::copy(right_in, self->input_right_.begin());
 
-    if (self->input_gain_ != 1.0F) {
-      self->apply_gain(self->input_left_, self->input_right_, self->input_gain_);
+    if (in_gain != 1.0F) {
+      self->apply_gain(self->input_left_, self->input_right_, in_gain);
     }
 
     std::ranges::copy(self->input_left_, left_out.begin());
@@ -741,15 +755,15 @@ class PipeWireRouter::ConvolverFilterNode {
     std::string rate_error;
     if (!self->host_.validate_rate(rate, rate_error)) {
       log::warn(rate_error);
-      if (self->output_gain_ != 1.0F) {
-        self->apply_gain(left_out, right_out, self->output_gain_);
+      if (out_gain != 1.0F) {
+        self->apply_gain(left_out, right_out, out_gain);
       }
       return;
     }
 
     if (!self->host_.ensure_ready(n_samples)) {
-      if (self->output_gain_ != 1.0F) {
-        self->apply_gain(left_out, right_out, self->output_gain_);
+      if (out_gain != 1.0F) {
+        self->apply_gain(left_out, right_out, out_gain);
       }
       return;
     }
@@ -758,19 +772,19 @@ class PipeWireRouter::ConvolverFilterNode {
     self->scratch_right_.assign(right_out.begin(), right_out.end());
 
     if (!self->host_.process(self->scratch_left_, self->scratch_right_)) {
-      if (self->output_gain_ != 1.0F) {
-        self->apply_gain(left_out, right_out, self->output_gain_);
+      if (out_gain != 1.0F) {
+        self->apply_gain(left_out, right_out, out_gain);
       }
       return;
     }
 
     for (size_t i = 0; i < left_out.size(); ++i) {
-      left_out[i] = (self->wet_ * self->scratch_left_[i]) + (self->dry_ * self->input_left_[i]);
-      right_out[i] = (self->wet_ * self->scratch_right_[i]) + (self->dry_ * self->input_right_[i]);
+      left_out[i] = (wet * self->scratch_left_[i]) + (dry * self->input_left_[i]);
+      right_out[i] = (wet * self->scratch_right_[i]) + (dry * self->input_right_[i]);
     }
 
-    if (self->output_gain_ != 1.0F) {
-      self->apply_gain(left_out, right_out, self->output_gain_);
+    if (out_gain != 1.0F) {
+      self->apply_gain(left_out, right_out, out_gain);
     }
   }
 
@@ -794,12 +808,12 @@ class PipeWireRouter::ConvolverFilterNode {
   FilterPort* left_out_ = nullptr;
   FilterPort* right_out_ = nullptr;
   uint32_t node_id_ = SPA_ID_INVALID;
-  bool can_get_node_id_ = false;
-  pw_filter_state state_ = PW_FILTER_STATE_UNCONNECTED;
-  float input_gain_ = static_cast<float>(ee::math::db_to_linear(preset_.input_gain_db));
-  float output_gain_ = static_cast<float>(ee::math::db_to_linear(preset_.output_gain_db));
-  float dry_ = preset_.dry_db <= ee::math::minimum_db_level ? 0.0F : static_cast<float>(ee::math::db_to_linear(preset_.dry_db));
-  float wet_ = preset_.wet_db <= ee::math::minimum_db_level ? 0.0F : static_cast<float>(ee::math::db_to_linear(preset_.wet_db));
+  std::atomic<bool> can_get_node_id_{false};
+  std::atomic<pw_filter_state> state_{PW_FILTER_STATE_UNCONNECTED};
+  std::atomic<float> input_gain_{static_cast<float>(ee::math::db_to_linear(preset_.input_gain_db))};
+  std::atomic<float> output_gain_{static_cast<float>(ee::math::db_to_linear(preset_.output_gain_db))};
+  std::atomic<float> dry_{preset_.dry_db <= ee::math::minimum_db_level ? 0.0F : static_cast<float>(ee::math::db_to_linear(preset_.dry_db))};
+  std::atomic<float> wet_{preset_.wet_db <= ee::math::minimum_db_level ? 0.0F : static_cast<float>(ee::math::db_to_linear(preset_.wet_db))};
   std::vector<float> scratch_left_;
   std::vector<float> scratch_right_;
   std::vector<float> input_left_;
