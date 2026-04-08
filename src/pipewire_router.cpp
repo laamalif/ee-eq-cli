@@ -933,6 +933,9 @@ const pw_link_events kLinkEvents = {
 PipeWireRouter::PipeWireRouter(ParsedPreset preset, std::string sink_selector)
     : preset_(std::move(preset)), sink_selector_(std::move(sink_selector)) {
   wake_fd_ = eventfd(0, EFD_CLOEXEC | EFD_NONBLOCK);
+  if (wake_fd_ == -1) {
+    log::warn(std::format("eventfd creation failed: {}", std::strerror(errno)));
+  }
 }
 
 PipeWireRouter::~PipeWireRouter() {
