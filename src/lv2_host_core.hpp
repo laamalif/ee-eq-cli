@@ -83,6 +83,7 @@ class Lv2HostCore {
   std::unordered_map<std::string, LV2_URID> uri_to_urid_;
   std::unordered_map<LV2_URID, std::string> urid_to_uri_;
   std::vector<Port> ports_;
+  std::unordered_map<std::string, uint32_t> control_port_index_;
 
   struct {
     struct {

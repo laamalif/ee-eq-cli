@@ -151,6 +151,12 @@ void Lv2HostCore::create_ports() {
   lilv_node_free(audio_port);
   lilv_node_free(output_port);
   lilv_node_free(input_port);
+
+  for (uint32_t i = 0; i < n_ports; ++i) {
+    if (ports_[i].type == PortType::Control) {
+      control_port_index_[ports_[i].symbol] = i;
+    }
+  }
 }
 
 auto Lv2HostCore::map_urid(const std::string& uri) -> LV2_URID {
@@ -307,24 +313,23 @@ void Lv2HostCore::run() const {
 }
 
 void Lv2HostCore::set_control_port_value(const std::string& symbol, float value) {
-  for (auto& port : ports_) {
-    if (port.type == PortType::Control && port.symbol == symbol) {
-      if (!port.is_input) {
-        return;
-      }
-      port.value = std::clamp(value, port.min, port.max);
-      return;
-    }
+  const auto it = control_port_index_.find(symbol);
+  if (it == control_port_index_.end()) {
+    return;
   }
+  auto& port = ports_[it->second];
+  if (!port.is_input) {
+    return;
+  }
+  port.value = std::clamp(value, port.min, port.max);
 }
 
 auto Lv2HostCore::get_control_port_value(const std::string& symbol) -> float {
-  for (const auto& port : ports_) {
-    if (port.type == PortType::Control && port.symbol == symbol) {
-      return port.value;
-    }
+  const auto it = control_port_index_.find(symbol);
+  if (it == control_port_index_.end()) {
+    return 0.0F;
   }
-  return 0.0F;
+  return ports_[it->second].value;
 }
 
 }  // namespace ee
