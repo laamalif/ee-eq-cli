@@ -52,6 +52,7 @@ constexpr auto kEqNodeName = "ee_eq_cli_equalizer";
 constexpr auto kEqPluginUri = "http://lsp-plug.in/plugins/lv2/para_equalizer_x32_lr";
 constexpr auto kLimiterNodeName = "ee_eq_cli_limiter";
 constexpr auto kLimiterPluginUri = "http://lsp-plug.in/plugins/lv2/sc_limiter_stereo";
+constexpr int kStartupPollIterations = 5000;
 constexpr auto kRapidRemovalWindow = std::chrono::milliseconds(1500);
 constexpr auto kLoopSuppressDuration = std::chrono::seconds(5);
 constexpr auto kLoopSuppressThreshold = 3;
@@ -171,7 +172,7 @@ class PipeWireRouter::EqFilterNode {
     pw_thread_loop_wait(thread_loop_);
     pw_thread_loop_unlock(thread_loop_);
 
-    for (int i = 0; i < 5000 && !can_get_node_id_; ++i) {
+    for (int i = 0; i < kStartupPollIterations && !can_get_node_id_; ++i) {
       std::this_thread::sleep_for(std::chrono::milliseconds(1));
       if (state_ == PW_FILTER_STATE_ERROR) {
         error = "EQ filter entered PipeWire error state";
@@ -403,7 +404,7 @@ class PipeWireRouter::LimiterFilterNode {
     pw_thread_loop_wait(thread_loop_);
     pw_thread_loop_unlock(thread_loop_);
 
-    for (int i = 0; i < 5000 && !can_get_node_id_; ++i) {
+    for (int i = 0; i < kStartupPollIterations && !can_get_node_id_; ++i) {
       std::this_thread::sleep_for(std::chrono::milliseconds(1));
       if (state_ == PW_FILTER_STATE_ERROR) {
         error = "Limiter filter entered PipeWire error state";
@@ -641,7 +642,7 @@ class PipeWireRouter::ConvolverFilterNode {
     pw_thread_loop_wait(thread_loop_);
     pw_thread_loop_unlock(thread_loop_);
 
-    for (int i = 0; i < 5000 && !can_get_node_id_; ++i) {
+    for (int i = 0; i < kStartupPollIterations && !can_get_node_id_; ++i) {
       std::this_thread::sleep_for(std::chrono::milliseconds(1));
       if (state_ == PW_FILTER_STATE_ERROR) {
         error = "Convolver filter entered PipeWire error state";
@@ -1219,7 +1220,7 @@ auto PipeWireRouter::wait_for_startup_sink(std::string& error) -> bool {
     return node.name == sink_selector_;
   };
 
-  for (int i = 0; i < 5000; ++i) {
+  for (int i = 0; i < kStartupPollIterations; ++i) {
     if (!sink_selector_.empty()) {
       for (const auto& node : snapshot_nodes()) {
         if (matches_selector(node)) {
@@ -1261,7 +1262,7 @@ auto PipeWireRouter::wait_for_startup_sink(std::string& error) -> bool {
 }
 
 auto PipeWireRouter::wait_for_virtual_sink(std::string& error) -> bool {
-  for (int i = 0; i < 5000; ++i) {
+  for (int i = 0; i < kStartupPollIterations; ++i) {
     if (auto node = find_node_by_name(kVirtualSinkName); node.has_value()) {
       {
         std::scoped_lock lock(state_mutex_);
@@ -1277,7 +1278,7 @@ auto PipeWireRouter::wait_for_virtual_sink(std::string& error) -> bool {
 }
 
 auto PipeWireRouter::wait_for_node_ports(uint32_t node_id, uint32_t minimum_ports, std::string& error) -> bool {
-  for (int i = 0; i < 5000; ++i) {
+  for (int i = 0; i < kStartupPollIterations; ++i) {
     if (count_node_ports(node_id) >= minimum_ports) {
       return true;
     }
