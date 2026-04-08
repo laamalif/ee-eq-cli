@@ -14,6 +14,8 @@
 #include "convolver_host.hpp"
 #include "ee_eq_preset_parser.hpp"
 #include "kernel_resolver.hpp"
+#include "lsp_labels.hpp"
+#include "math_utils.hpp"
 #include "preset_source.hpp"
 
 namespace {
@@ -38,6 +40,13 @@ struct TempDir {
 void expect(bool condition, std::string_view message) {
   if (!condition) {
     ee::log::error(std::string("FAIL: ") + std::string(message));
+    ++g_failures;
+  }
+}
+
+void expect_near(double actual, double expected, double tolerance, std::string_view message) {
+  if (std::abs(actual - expected) > tolerance) {
+    ee::log::error(std::format("FAIL: {} (expected {}, got {})", message, expected, actual));
     ++g_failures;
   }
 }
@@ -327,6 +336,141 @@ void test_convolver_validate_rate() {
   expect(error.empty(), "matching convolver rate should not warn");
 }
 
+void test_db_to_linear_identity() {
+  expect_near(ee::math::db_to_linear(0.0), 1.0, 1e-9, "0 dB should equal unity gain");
+}
+
+void test_db_to_linear_positive() {
+  expect_near(ee::math::db_to_linear(6.0), 1.99526, 1e-4, "+6 dB should roughly double amplitude");
+  expect_near(ee::math::db_to_linear(20.0), 10.0, 1e-4, "+20 dB should equal 10x amplitude");
+}
+
+void test_db_to_linear_negative() {
+  expect_near(ee::math::db_to_linear(-6.0), 0.50119, 1e-4, "-6 dB should roughly halve amplitude");
+  expect_near(ee::math::db_to_linear(-20.0), 0.1, 1e-4, "-20 dB should equal 0.1x amplitude");
+}
+
+void test_db_to_linear_extreme() {
+  expect_near(ee::math::db_to_linear(-100.0), 1e-5, 1e-7, "-100 dB should be near silence");
+}
+
+void test_label_index_first_element() {
+  using namespace ee::labels;
+  expect(label_index(kBandTypeLabels, "Off") == 0.0F, "first band type 'Off' should be index 0");
+  expect(label_index(kEqModeLabels, "IIR") == 0.0F, "first EQ mode 'IIR' should be index 0");
+}
+
+void test_label_index_middle_elements() {
+  using namespace ee::labels;
+  expect(label_index(kBandTypeLabels, "Bell") == 1.0F, "'Bell' should be index 1");
+  expect(label_index(kEqModeLabels, "FFT") == 2.0F, "'FFT' should be index 2");
+}
+
+void test_label_index_last_elements() {
+  using namespace ee::labels;
+  expect(label_index(kBandTypeLabels, "Ladder-rej") == 11.0F, "last band type should be index 11");
+  expect(label_index(kLimiterModeLabels, "Line Duck") == 11.0F, "last limiter mode should be index 11");
+}
+
+void test_label_index_unknown_returns_zero() {
+  using namespace ee::labels;
+  expect(label_index(kBandTypeLabels, "Unknown") == 0.0F, "unknown label should fall back to index 0");
+  expect(label_index(kEqModeLabels, "Nonexistent") == 0.0F, "unknown EQ mode should fall back to index 0");
+}
+
+void test_cli_args_help_flag() {
+  std::string error;
+  const std::vector<std::string> arguments = {"ee-eq-cli", "--help"};
+  const auto args = ee::parse_cli_args(arguments, error);
+  expect(error.empty(), "--help should not produce an error");
+  expect(args.show_help, "--help should set show_help");
+}
+
+void test_cli_args_help_short() {
+  std::string error;
+  const std::vector<std::string> arguments = {"ee-eq-cli", "-h"};
+  const auto args = ee::parse_cli_args(arguments, error);
+  expect(error.empty(), "-h should not produce an error");
+  expect(args.show_help, "-h should set show_help");
+}
+
+void test_cli_args_version_flag() {
+  std::string error;
+  const std::vector<std::string> arguments = {"ee-eq-cli", "--version"};
+  const auto args = ee::parse_cli_args(arguments, error);
+  expect(error.empty(), "--version should not produce an error");
+  expect(args.show_version, "--version should set show_version");
+}
+
+void test_cli_args_version_short() {
+  std::string error;
+  const std::vector<std::string> arguments = {"ee-eq-cli", "-v"};
+  const auto args = ee::parse_cli_args(arguments, error);
+  expect(error.empty(), "-v should not produce an error");
+  expect(args.show_version, "-v should set show_version");
+}
+
+void test_cli_args_dry_run() {
+  std::string error;
+  const std::vector<std::string> arguments = {"ee-eq-cli", "--preset", fixture_path("Boosted.json"), "--dry-run"};
+  const auto args = ee::parse_cli_args(arguments, error);
+  expect(error.empty(), "--dry-run should parse without error");
+  expect(args.dry_run, "--dry-run should set dry_run");
+}
+
+void test_cli_args_dry_run_short() {
+  std::string error;
+  const std::vector<std::string> arguments = {"ee-eq-cli", "--preset", fixture_path("Boosted.json"), "-d"};
+  const auto args = ee::parse_cli_args(arguments, error);
+  expect(error.empty(), "-d should parse without error");
+  expect(args.dry_run, "-d should set dry_run");
+}
+
+void test_cli_args_sink_selector() {
+  std::string error;
+  const std::vector<std::string> arguments = {"ee-eq-cli", "--preset", fixture_path("Boosted.json"), "--sink", "my_sink"};
+  const auto args = ee::parse_cli_args(arguments, error);
+  expect(error.empty(), "--sink should parse without error");
+  expect(args.sink_selector == "my_sink", "--sink should set sink_selector");
+}
+
+void test_cli_args_sink_short() {
+  std::string error;
+  const std::vector<std::string> arguments = {"ee-eq-cli", "--preset", fixture_path("Boosted.json"), "-s", "my_sink"};
+  const auto args = ee::parse_cli_args(arguments, error);
+  expect(error.empty(), "-s should parse without error");
+  expect(args.sink_selector == "my_sink", "-s should set sink_selector");
+}
+
+void test_cli_args_preset_short() {
+  std::string error;
+  const std::vector<std::string> arguments = {"ee-eq-cli", "-p", fixture_path("Boosted.json")};
+  const auto args = ee::parse_cli_args(arguments, error);
+  expect(error.empty(), "-p should parse without error");
+  expect(args.preset_source == fixture_path("Boosted.json"), "-p should set preset_source");
+}
+
+void test_cli_args_unknown_option() {
+  std::string error;
+  const std::vector<std::string> arguments = {"ee-eq-cli", "--bogus"};
+  const auto args = ee::parse_cli_args(arguments, error);
+  expect(error == "unknown option: --bogus", "unknown option should produce the expected error");
+}
+
+void test_cli_args_missing_preset_value() {
+  std::string error;
+  const std::vector<std::string> arguments = {"ee-eq-cli", "--preset"};
+  const auto args = ee::parse_cli_args(arguments, error);
+  expect(error == "missing value for --preset", "missing --preset value should produce the expected error");
+}
+
+void test_cli_args_missing_sink_value() {
+  std::string error;
+  const std::vector<std::string> arguments = {"ee-eq-cli", "--sink"};
+  const auto args = ee::parse_cli_args(arguments, error);
+  expect(error == "missing value for --sink", "missing --sink value should produce the expected error");
+}
+
 }  // namespace
 
 int main() {
@@ -346,6 +490,29 @@ int main() {
   test_resolve_kernel_fuzzy_match();
   test_resolve_kernel_missing();
   test_convolver_validate_rate();
+
+  test_db_to_linear_identity();
+  test_db_to_linear_positive();
+  test_db_to_linear_negative();
+  test_db_to_linear_extreme();
+
+  test_label_index_first_element();
+  test_label_index_middle_elements();
+  test_label_index_last_elements();
+  test_label_index_unknown_returns_zero();
+
+  test_cli_args_help_flag();
+  test_cli_args_help_short();
+  test_cli_args_version_flag();
+  test_cli_args_version_short();
+  test_cli_args_dry_run();
+  test_cli_args_dry_run_short();
+  test_cli_args_sink_selector();
+  test_cli_args_sink_short();
+  test_cli_args_preset_short();
+  test_cli_args_unknown_option();
+  test_cli_args_missing_preset_value();
+  test_cli_args_missing_sink_value();
 
   if (g_failures != 0) {
     ee::log::error(std::format("{} test assertion(s) failed", g_failures));
