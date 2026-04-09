@@ -1881,6 +1881,7 @@ void PipeWireRouter::on_registry_global(uint32_t id, const char* type, const spa
     auto* node_data = static_cast<NodeData*>(pw_proxy_get_user_data(proxy));
     node_data->router = this;
     node_data->proxy = proxy;
+    node_data->removed = false;  // Clear flag in case NodeData is reused
     node_data->info = new NodeInfo();
     node_data->info->id = id;
     if (const auto* v = spa_dict_lookup(props, PW_KEY_OBJECT_SERIAL)) {
