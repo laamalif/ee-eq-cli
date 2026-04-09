@@ -20,6 +20,14 @@ Optional flags:
 - `--dry-run`
 - `--list-sinks`
 
+### AutoEQ Converter
+
+Convert AutoEQ parametric EQ text files to EasyEffects JSON:
+
+```bash
+ee-eq-cli --convert-autoeq input.txt --output preset.json
+```
+
 
 ## Convolver
 
