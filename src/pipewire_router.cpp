@@ -1088,6 +1088,21 @@ void PipeWireRouter::stop() {
     if (node == nullptr) {
       continue;
     }
+
+    // Claim ownership of cleanup under lock to prevent race with on_node_proxy_removed
+    bool should_cleanup = false;
+    {
+      std::scoped_lock lock(state_mutex_);
+      if (!node->removed) {
+        node->removed = true;
+        should_cleanup = true;
+      }
+    }
+
+    if (!should_cleanup) {
+      continue;  // on_node_proxy_removed already cleaned up
+    }
+
     free_node_info(node);
     if (node->proxy_listener.link.next != nullptr || node->proxy_listener.link.prev != nullptr) {
       spa_hook_remove(&node->proxy_listener);
@@ -1965,6 +1980,9 @@ void PipeWireRouter::on_node_proxy_removed(NodeData* data) {
   pw_proxy* proxy = nullptr;
   {
     std::scoped_lock lock(state_mutex_);
+    if (data->removed) {
+      return;  // Already cleaned up by stop()
+    }
     data->removed = true;
 
     if (data->info != nullptr) {
