@@ -62,6 +62,20 @@ auto parse_cli_args(std::span<const std::string> arguments, std::string& error) 
       }
       continue;
     }
+    if (argument == "--convert-autoeq") {
+      args.convert_autoeq_source = take_value(arguments, i, argument, error);
+      if (!error.empty()) {
+        return {};
+      }
+      continue;
+    }
+    if (argument == "--output" || argument == "-o") {
+      args.output_path = take_value(arguments, i, argument, error);
+      if (!error.empty()) {
+        return {};
+      }
+      continue;
+    }
     if (argument == "--sink" || argument == "-s") {
       args.sink_selector = take_value(arguments, i, argument, error);
       if (!error.empty()) {
@@ -80,6 +94,36 @@ auto parse_cli_args(std::span<const std::string> arguments, std::string& error) 
 
     error = std::format("unknown option: {}", argument);
     return {};
+  }
+
+  if (!args.preset_source.empty() && !args.convert_autoeq_source.empty()) {
+    error = "--preset and --convert-autoeq cannot be used together";
+    return {};
+  }
+
+  if (!args.output_path.empty() && args.convert_autoeq_source.empty()) {
+    error = "--output requires --convert-autoeq";
+    return {};
+  }
+
+  if (!args.convert_autoeq_source.empty()) {
+    if (args.list_sinks) {
+      error = "--convert-autoeq cannot be used with --list-sinks";
+      return {};
+    }
+    if (!args.sink_selector.empty()) {
+      error = "--convert-autoeq cannot be used with --sink";
+      return {};
+    }
+    if (args.dry_run) {
+      error = "--convert-autoeq cannot be used with --dry-run";
+      return {};
+    }
+    if (is_url(args.convert_autoeq_source)) {
+      error = "--convert-autoeq must be a local file path";
+      return {};
+    }
+    return args;
   }
 
   if (args.preset_source.empty() && !args.list_sinks) {
@@ -107,6 +151,9 @@ auto cli_help_text(std::string_view executable_name) -> std::string {
       "Load an EasyEffects EQ preset into a minimal headless PipeWire/LV2 runtime.\n\n"
       "Options:\n"
       "  -p, --preset <preset>  Local EasyEffects EQ preset path.\n"
+      "      --convert-autoeq <text>\n"
+      "                        Convert a local AutoEQ-style parametric EQ text file into EasyEffects JSON.\n"
+      "  -o, --output <path>    Write converted JSON to a file instead of stdout.\n"
       "  -s, --sink <sink>      Optional sink override by PipeWire node name or object serial.\n"
       "  -d, --dry-run          Validate preset, resolve plugins/kernels, print what would be applied, and exit.\n"
       "      --list-sinks       List current PipeWire output sinks and exit.\n"

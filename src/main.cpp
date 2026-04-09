@@ -6,6 +6,7 @@
 #include <cerrno>
 #include <climits>
 #include <cstring>
+#include <fstream>
 #include <poll.h>
 #include <sys/signalfd.h>
 #include <string>
@@ -141,6 +142,43 @@ int main(int argc, char* argv[]) {
     for (const auto& line : sinks) {
       ee::log::info(line);
     }
+    return EXIT_SUCCESS;
+  }
+
+  if (!args.convert_autoeq_source.empty()) {
+    const auto loaded = ee::load_preset_source(args.convert_autoeq_source, error);
+    if (!error.empty()) {
+      ee::log::error(error);
+      return EXIT_FAILURE;
+    }
+
+    std::string parse_error;
+    const auto preset = ee::parse_autoeq_preset(loaded.bytes, parse_error);
+    if (!parse_error.empty()) {
+      ee::log::error(parse_error);
+      return EXIT_FAILURE;
+    }
+    for (const auto& warning : preset.warnings) {
+      ee::log::warn(warning);
+    }
+
+    const auto rendered = ee::render_easy_effects_preset_json(preset);
+    if (args.output_path.empty()) {
+      ee::log::info(rendered);
+      return EXIT_SUCCESS;
+    }
+
+    std::ofstream output(args.output_path, std::ios::binary | std::ios::trunc);
+    if (!output.is_open()) {
+      ee::log::error(std::format("failed to open output file: {}", args.output_path));
+      return EXIT_FAILURE;
+    }
+    output << rendered << '\n';
+    if (!output.good()) {
+      ee::log::error(std::format("failed to write output file: {}", args.output_path));
+      return EXIT_FAILURE;
+    }
+    ee::log::info(std::format("wrote converted preset: {}", args.output_path));
     return EXIT_SUCCESS;
   }
 

@@ -9,6 +9,8 @@ namespace ee {
 
 struct CliArgs {
   std::string preset_source;
+  std::string convert_autoeq_source;
+  std::string output_path;
   std::string sink_selector;
   bool dry_run = false;
   bool list_sinks = false;

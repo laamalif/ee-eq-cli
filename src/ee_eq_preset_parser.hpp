@@ -86,5 +86,7 @@ struct ParsedPreset {
 };
 
 auto parse_easy_effects_preset(std::string_view bytes, std::string& error) -> ParsedPreset;
+auto parse_autoeq_preset(std::string_view text, std::string& error) -> ParsedPreset;
+auto render_easy_effects_preset_json(const ParsedPreset& preset) -> std::string;
 
 }  // namespace ee

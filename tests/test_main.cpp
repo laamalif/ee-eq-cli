@@ -79,6 +79,40 @@ void test_cli_args_accept_local_preset() {
   expect(!args.list_sinks, "--list-sinks should default to false");
 }
 
+void test_cli_args_convert_autoeq() {
+  std::string error;
+  const std::vector<std::string> arguments = {"ee-eq-cli", "--convert-autoeq", fixture_path("Boosted.json")};
+  const auto args = ee::parse_cli_args(arguments, error);
+  expect(error.empty(), "--convert-autoeq should parse");
+  expect(args.convert_autoeq_source == fixture_path("Boosted.json"), "--convert-autoeq should preserve its input path");
+  expect(args.preset_source.empty(), "--convert-autoeq should not populate preset_source");
+}
+
+void test_cli_args_convert_autoeq_output() {
+  std::string error;
+  const std::vector<std::string> arguments = {"ee-eq-cli", "--convert-autoeq", "input.txt", "--output", "preset.json"};
+  const auto args = ee::parse_cli_args(arguments, error);
+  expect(error.empty(), "--output should be accepted with --convert-autoeq");
+  expect(args.output_path == "preset.json", "--output should preserve its output path");
+}
+
+void test_cli_args_output_requires_convert_autoeq() {
+  std::string error;
+  const std::vector<std::string> arguments = {"ee-eq-cli", "--output", "preset.json"};
+  const auto args = ee::parse_cli_args(arguments, error);
+  expect(args.output_path.empty(), "--output alone should not be accepted");
+  expect(error == "--output requires --convert-autoeq", "--output alone should produce the expected error");
+}
+
+void test_cli_args_convert_autoeq_conflicts_with_preset() {
+  std::string error;
+  const std::vector<std::string> arguments = {"ee-eq-cli", "--preset", "a.json", "--convert-autoeq", "b.txt"};
+  const auto args = ee::parse_cli_args(arguments, error);
+  expect(args.preset_source.empty(), "conflicting preset sources should fail parsing");
+  expect(error == "--preset and --convert-autoeq cannot be used together",
+         "--preset and --convert-autoeq should be mutually exclusive");
+}
+
 void test_cli_args_reject_url_preset() {
   std::string error;
   const std::vector<std::string> arguments = {"ee-eq-cli", "--preset", "https://example.invalid/preset.json"};
@@ -226,6 +260,73 @@ void test_parse_duplicate_plugin_kind_rejected() {
   expect(error == "duplicate plugin kind is not supported: equalizer",
          "duplicate normalized plugin kinds should be rejected explicitly");
   expect(parsed.plugin_order.empty(), "duplicate plugin kinds should not produce a parsed plugin order");
+}
+
+void test_parse_autoeq_fixture(std::string_view fixture_name,
+                               double expected_preamp,
+                               double expected_first_frequency,
+                               double expected_last_gain) {
+  std::string error;
+  const auto loaded = ee::load_preset_source(fixture_path(fixture_name), error);
+  expect(error.empty(), "AutoEQ fixture should load");
+
+  std::string parse_error;
+  const auto parsed = ee::parse_autoeq_preset(loaded.bytes, parse_error);
+  expect(parse_error.empty(), "AutoEQ fixture should parse");
+  expect(parsed.plugin_order == std::vector<std::string>({"equalizer"}),
+         "AutoEQ import should produce an equalizer-only plugin order");
+  expect_near(parsed.equalizer.input_gain_db, expected_preamp, 1e-6, "AutoEQ preamp should map to equalizer input gain");
+  expect(parsed.equalizer.num_bands == 10, "AutoEQ fixture should import all ten bands");
+  expect(parsed.equalizer.left[0].type == "Lo-shelf", "LSC should map to Lo-shelf");
+  expect(parsed.equalizer.left[1].type == "Bell", "PK should map to Bell");
+  expect(parsed.equalizer.left[9].type == "Hi-shelf", "HSC should map to Hi-shelf");
+  expect(parsed.equalizer.left[1].mode == "APO (DR)", "imported AutoEQ bands should use APO (DR) mode");
+  expect_near(parsed.equalizer.left[0].frequency, expected_first_frequency, 1e-6, "first band frequency should be preserved");
+  expect_near(parsed.equalizer.left[9].gain_db, expected_last_gain, 1e-6, "last band gain should be preserved");
+}
+
+void test_parse_autoeq_requires_supported_filter_lines() {
+  constexpr std::string_view autoeq = R"(Preamp: -2.25 dB
+# comment only
+Filter 1: OFF PK Fc 105.0 Hz Gain -2.4 dB Q 0.70
+)";
+
+  std::string error;
+  const auto parsed = ee::parse_autoeq_preset(autoeq, error);
+  expect(error == "no supported AutoEQ filter lines were found",
+         "AutoEQ import should fail if no enabled supported filter lines remain");
+  expect(parsed.plugin_order.empty(), "failed AutoEQ import should not produce a parsed preset");
+}
+
+void test_parse_autoeq_unsupported_filter_type() {
+  constexpr std::string_view autoeq = R"(Filter 1: ON LS 6dB Fc 105.0 Hz Gain -2.4 dB Q 0.70
+)";
+
+  std::string error;
+  const auto parsed = ee::parse_autoeq_preset(autoeq, error);
+  expect(error == "unsupported AutoEQ filter type 'LS 6DB'",
+         "unsupported AutoEQ filter types should produce an actionable error");
+  expect(parsed.plugin_order.empty(), "unsupported AutoEQ filter types should not produce a parsed preset");
+}
+
+void test_render_easy_effects_preset_json_round_trip() {
+  std::string error;
+  const auto loaded = ee::load_preset_source(fixture_path("Samsung Galaxy Buds Pro 2.txt"), error);
+  expect(error.empty(), "AutoEQ fixture for round-trip should load");
+
+  std::string parse_error;
+  const auto imported = ee::parse_autoeq_preset(loaded.bytes, parse_error);
+  expect(parse_error.empty(), "AutoEQ import for round-trip should parse");
+
+  const auto rendered = ee::render_easy_effects_preset_json(imported);
+  std::string round_trip_error;
+  const auto reparsed = ee::parse_easy_effects_preset(rendered, round_trip_error);
+  expect(round_trip_error.empty(), "rendered AutoEQ JSON should parse as an EasyEffects preset");
+  expect(reparsed.plugin_order == std::vector<std::string>({"equalizer"}),
+         "rendered AutoEQ JSON should remain equalizer-only");
+  expect(reparsed.equalizer.num_bands == 10, "rendered AutoEQ JSON should preserve band count");
+  expect(reparsed.equalizer.left[0].mode == "APO (DR)", "rendered AutoEQ JSON should preserve APO band mode");
+  expect_near(reparsed.equalizer.left[0].frequency, 105.0, 1e-6, "rendered AutoEQ JSON should preserve frequency");
 }
 
 void test_resolve_kernel_exact_match() {
@@ -692,6 +793,10 @@ void test_resolve_kernel_name_from_path() {
 
 int main() {
   test_cli_args_accept_local_preset();
+  test_cli_args_convert_autoeq();
+  test_cli_args_convert_autoeq_output();
+  test_cli_args_output_requires_convert_autoeq();
+  test_cli_args_convert_autoeq_conflicts_with_preset();
   test_cli_args_reject_url_preset();
   test_cli_args_allow_list_sinks_without_preset();
   test_cli_args_require_preset_or_env();
@@ -703,6 +808,12 @@ int main() {
   test_parse_fixture_with_convolver_and_limiter();
   test_parse_invalid_preset();
   test_parse_duplicate_plugin_kind_rejected();
+  test_parse_autoeq_fixture("Samsung Galaxy Buds Pro 2.txt", -3.76, 105.0, -4.4);
+  test_parse_autoeq_fixture("Sony MH755.txt", -2.43, 105.0, -2.4);
+  test_parse_autoeq_fixture("Anker Soundcore Life Q20.txt", -3.63, 105.0, 0.7);
+  test_parse_autoeq_requires_supported_filter_lines();
+  test_parse_autoeq_unsupported_filter_type();
+  test_render_easy_effects_preset_json_round_trip();
   test_resolve_kernel_exact_match();
   test_resolve_kernel_fuzzy_match();
   test_resolve_kernel_missing();
