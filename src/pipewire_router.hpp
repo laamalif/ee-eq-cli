@@ -87,6 +87,8 @@ class PipeWireRouter {
     std::string target_object;
   };
 
+  static void free_node_info(NodeData* node);
+
   struct PatchAttemptInfo {
     std::string name;
     std::chrono::steady_clock::time_point patched_at{};

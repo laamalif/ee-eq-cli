@@ -110,6 +110,13 @@ struct PipeWireRouter::NodeData {
   bool removed = false;
 };
 
+void PipeWireRouter::free_node_info(NodeData* node) {
+  if (node != nullptr && node->info != nullptr) {
+    delete node->info;
+    node->info = nullptr;
+  }
+}
+
 class PipeWireRouter::EqFilterNode {
  public:
   EqFilterNode(pw_core* core, pw_thread_loop* thread_loop, const EqPreset& preset)
@@ -1051,10 +1058,7 @@ void PipeWireRouter::stop() {
   }
 
   for (auto* node : bound_nodes_) {
-    if (node != nullptr && node->info != nullptr) {
-      delete node->info;
-      node->info = nullptr;
-    }
+    free_node_info(node);
     if (node != nullptr &&
         (node->proxy_listener.link.next != nullptr || node->proxy_listener.link.prev != nullptr)) {
       spa_hook_remove(&node->proxy_listener);
@@ -1961,8 +1965,7 @@ void PipeWireRouter::on_node_proxy_removed(NodeData* data) {
                             data->info->id,
                             data->info->serial));
 
-      delete data->info;
-      data->info = nullptr;
+      free_node_info(data);
     }
 
     if (data->object_listener.link.next != nullptr || data->object_listener.link.prev != nullptr) {
