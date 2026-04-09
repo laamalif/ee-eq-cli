@@ -759,7 +759,10 @@ class PipeWireRouter::ConvolverFilterNode {
 
     std::string rate_error;
     if (!self->host_.validate_rate(rate, rate_error)) {
-      log::warn(rate_error);
+      if (!self->rate_mismatch_warned_) {
+        log::warn(rate_error);
+        self->rate_mismatch_warned_ = true;
+      }
       if (out_gain != 1.0F) {
         self->apply_gain(left_out, right_out, out_gain);
       }
@@ -825,6 +828,7 @@ class PipeWireRouter::ConvolverFilterNode {
   std::vector<float> input_right_;
   std::vector<float> dummy_left_;
   std::vector<float> dummy_right_;
+  mutable bool rate_mismatch_warned_ = false;
 
   const pw_filter_events filter_events_ = {
       .version = 0,
