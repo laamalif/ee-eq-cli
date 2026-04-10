@@ -1313,6 +1313,36 @@ auto PipeWireRouter::wait_for_startup_sink(std::string& error) -> bool {
           return true;
         }
       }
+
+      std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+  }
+
+  // Last-resort auto mode: if startup metadata never resolved, select the only
+  // non-virtual audio sink the registry exposed.
+  if (sink_selector_.empty()) {
+    std::optional<NodeInfo> sole_real_sink;
+    for (const auto& node : snapshot_nodes()) {
+      if (node.media_class != kMediaClassAudioSink || node.name == kVirtualSinkName) {
+        continue;
+      }
+      if (sole_real_sink.has_value()) {
+        sole_real_sink.reset();
+        break;
+      }
+      sole_real_sink = node;
+    }
+
+    if (sole_real_sink.has_value()) {
+      {
+        std::scoped_lock lock(state_mutex_);
+        selected_sink_ = *sole_real_sink;
+      }
+      startup_sink_locked_ = true;
+      log::info(std::format("selected sole discovered sink at startup: {} (serial {})",
+                            sole_real_sink->name,
+                            sole_real_sink->serial));
+      return true;
     }
   }
 
