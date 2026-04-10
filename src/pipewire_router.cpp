@@ -1292,27 +1292,28 @@ auto PipeWireRouter::wait_for_startup_sink(std::string& error) -> bool {
           return true;
         }
       }
-    }
 
-    const auto selected_sink = snapshot_selected_sink();
-    if (!selected_sink.name.empty() && selected_sink.serial != 0) {
-      startup_sink_locked_ = true;
-      log::info(std::format("selected startup sink: {} (serial {})", selected_sink.name, selected_sink.serial));
-      return true;
-    }
-
-    if (!selected_sink.name.empty()) {
-      if (auto node = find_node_by_name(selected_sink.name); node.has_value()) {
-        {
-          std::scoped_lock lock(state_mutex_);
-          selected_sink_ = *node;
-        }
+      std::this_thread::sleep_for(std::chrono::milliseconds(1));
+      continue;
+    } else {
+      const auto selected_sink = snapshot_selected_sink();
+      if (!selected_sink.name.empty() && selected_sink.serial != 0) {
         startup_sink_locked_ = true;
+        log::info(std::format("selected startup sink: {} (serial {})", selected_sink.name, selected_sink.serial));
         return true;
       }
-    }
 
-    std::this_thread::sleep_for(std::chrono::milliseconds(1));
+      if (!selected_sink.name.empty()) {
+        if (auto node = find_node_by_name(selected_sink.name); node.has_value()) {
+          {
+            std::scoped_lock lock(state_mutex_);
+            selected_sink_ = *node;
+          }
+          startup_sink_locked_ = true;
+          return true;
+        }
+      }
+    }
   }
 
   error = sink_selector_.empty() ? "failed to resolve the current default sink at startup"
