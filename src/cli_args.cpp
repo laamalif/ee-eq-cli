@@ -149,6 +149,9 @@ auto cli_help_text(std::string_view executable_name) -> std::string {
   return std::format(
       "Usage: {} [options]\n"
       "Load an EasyEffects EQ preset into a minimal headless PipeWire/LV2 runtime.\n\n"
+      "Daemon mode:\n"
+      "      {} daemon start\n"
+      "      {} status|health|current-sink|apply <preset>|enable|disable|list-sinks|shutdown\n\n"
       "Options:\n"
       "  -p, --preset <preset>  Local EasyEffects EQ preset path.\n"
       "      --convert-autoeq <text>\n"
@@ -162,6 +165,8 @@ auto cli_help_text(std::string_view executable_name) -> std::string {
       "\n"
       "Advanced environment:\n"
       "      EE_EQ_CLI_DEFAULT_PRESET  Fallback local preset path when --preset is omitted.\n",
+      executable_name,
+      executable_name,
       executable_name);
 }
 

@@ -1,5 +1,6 @@
 #include <algorithm>
 #include <array>
+#include <chrono>
 #include <cstdlib>
 #include <csignal>
 #include <format>
@@ -7,23 +8,28 @@
 #include <climits>
 #include <cstring>
 #include <fstream>
+#include <optional>
 #include <poll.h>
 #include <sys/signalfd.h>
 #include <string>
 #include <system_error>
+#include <ctime>
 #include <unistd.h>
 #include <vector>
 
+#include <nlohmann/json.hpp>
+
+#include "app_metadata.hpp"
 #include "cli_args.hpp"
+#include "daemon_backend.hpp"
+#include "daemon_controller.hpp"
+#include "daemon_ipc.hpp"
 #include "ee_eq_preset_parser.hpp"
 #include "logging.hpp"
 #include "pipewire_router.hpp"
 #include "preset_source.hpp"
 
 namespace {
-
-constexpr auto kApplicationName = "ee-eq-cli";
-constexpr auto kApplicationVersion = "0.2.10.1";
 
 auto summarize_plugins(const ee::ParsedPreset& preset) -> std::string {
   std::string summary;
@@ -39,6 +45,20 @@ auto summarize_plugins(const ee::ParsedPreset& preset) -> std::string {
 auto summarize_effective_config(const ee::CliArgs& args, const ee::ParsedPreset& preset) -> std::string {
   const auto sink = args.sink_selector.empty() ? std::string("auto") : args.sink_selector;
   return std::format("effective config: sink={} stages={}", sink, summarize_plugins(preset));
+}
+
+auto utc_now_iso8601() -> std::string {
+  const auto now = std::chrono::system_clock::now();
+  const std::time_t time = std::chrono::system_clock::to_time_t(now);
+  std::tm tm{};
+  gmtime_r(&time, &tm);
+  std::array<char, 32> buffer{};
+  std::strftime(buffer.data(), buffer.size(), "%Y-%m-%dT%H:%M:%SZ", &tm);
+  return buffer.data();
+}
+
+void print_status_json(const ee::DaemonStatus& status) {
+  ee::log::info(nlohmann::json(status).dump(2));
 }
 
 auto wait_for_shutdown_signal(ee::PipeWireRouter& router) -> int {
@@ -103,6 +123,126 @@ auto wait_for_shutdown_signal(ee::PipeWireRouter& router) -> int {
   }
 }
 
+auto handle_daemon_mode(const std::vector<std::string>& arguments) -> std::optional<int> {
+  if (arguments.size() < 2) {
+    return std::nullopt;
+  }
+
+  auto send_request = [&](const ee::DaemonRequest& request) -> std::optional<ee::DaemonResponse> {
+    ee::DaemonResponse response;
+    std::string error;
+    if (!ee::send_daemon_request(request, response, error)) {
+      ee::log::error(error);
+      return std::nullopt;
+    }
+    if (!response.ok) {
+      ee::log::error(response.error);
+      return std::nullopt;
+    }
+    return response;
+  };
+
+  if (arguments[1] == "daemon") {
+    if (arguments.size() != 3 || arguments[2] != "start") {
+      ee::log::error("usage: ee-eq-cli daemon start");
+      return EXIT_FAILURE;
+    }
+    if (const auto env_error = ee::daemon_mode_environment_error(); !env_error.empty()) {
+      ee::log::error(env_error);
+      return EXIT_FAILURE;
+    }
+
+    ee::DaemonController controller(
+        ee::make_real_session_backend(), ee::kApplicationVersion, static_cast<int>(getpid()), utc_now_iso8601());
+    std::string error;
+    const int result = ee::run_daemon_ipc_server(controller, error);
+    if (result != EXIT_SUCCESS) {
+      ee::log::error(error);
+      return EXIT_FAILURE;
+    }
+    return EXIT_SUCCESS;
+  }
+
+  if (arguments[1] == "status") {
+    if (const auto response = send_request(ee::DaemonRequest{.command = "status"}); response.has_value()) {
+      print_status_json(response->status);
+      return EXIT_SUCCESS;
+    }
+    return EXIT_FAILURE;
+  }
+
+  if (arguments[1] == "health") {
+    if (const auto response = send_request(ee::DaemonRequest{.command = "status"}); response.has_value()) {
+      const auto health =
+          response->status.health == ee::HealthState::Ok
+              ? "ok"
+              : response->status.health == ee::HealthState::Degraded ? "degraded" : "failed";
+      ee::log::info(health);
+      return EXIT_SUCCESS;
+    }
+    return EXIT_FAILURE;
+  }
+
+  if (arguments[1] == "current-sink") {
+    if (const auto response = send_request(ee::DaemonRequest{.command = "status"}); response.has_value()) {
+      if (!response->status.effective.session_active || response->status.effective.sink_name.empty()) {
+        ee::log::info("no active session");
+      } else {
+        ee::log::info(std::format("{} [serial {}]",
+                                  response->status.effective.sink_name,
+                                  response->status.effective.sink_serial));
+      }
+      return EXIT_SUCCESS;
+    }
+    return EXIT_FAILURE;
+  }
+
+  if (arguments[1] == "apply") {
+    if (arguments.size() < 3) {
+      ee::log::error("usage: ee-eq-cli apply <preset> [--sink <name-or-serial>]");
+      return EXIT_FAILURE;
+    }
+
+    ee::DaemonRequest request{.command = "apply", .preset_path = arguments[2]};
+    for (size_t i = 3; i < arguments.size(); ++i) {
+      if (arguments[i] == "--sink" || arguments[i] == "-s") {
+        if (i + 1 >= arguments.size()) {
+          ee::log::error("missing value for --sink");
+          return EXIT_FAILURE;
+        }
+        request.sink_selector = arguments[++i];
+        continue;
+      }
+      ee::log::error(std::format("unknown option: {}", arguments[i]));
+      return EXIT_FAILURE;
+    }
+
+    if (const auto response = send_request(request); response.has_value()) {
+      print_status_json(response->status);
+      return EXIT_SUCCESS;
+    }
+    return EXIT_FAILURE;
+  }
+
+  if (arguments[1] == "enable" || arguments[1] == "disable" || arguments[1] == "list-sinks" || arguments[1] == "shutdown") {
+    const std::string command =
+        arguments[1] == "list-sinks" ? "list-sinks" : arguments[1] == "shutdown" ? "shutdown" : arguments[1];
+    if (const auto response = send_request(ee::DaemonRequest{.command = command}); response.has_value()) {
+      if (command == "list-sinks") {
+        for (const auto& sink : response->sinks) {
+          ee::log::info(sink);
+        }
+      } else {
+        print_status_json(response->status);
+      }
+      return EXIT_SUCCESS;
+    }
+    return EXIT_FAILURE;
+  }
+
+  return std::nullopt;
+}
+
 }  // namespace
 
 int main(int argc, char* argv[]) {
@@ -112,6 +252,10 @@ int main(int argc, char* argv[]) {
     arguments.emplace_back(argv[i]);
   }
 
+  if (const auto daemon_result = handle_daemon_mode(arguments); daemon_result.has_value()) {
+    return *daemon_result;
+  }
+
   std::string error;
   const auto args = ee::parse_cli_args(arguments, error);
   if (!error.empty()) {
@@ -119,11 +263,11 @@ int main(int argc, char* argv[]) {
     return EXIT_FAILURE;
   }
   if (args.show_help) {
-    ee::log::info(ee::cli_help_text(argc > 0 ? argv[0] : kApplicationName));
+    ee::log::info(ee::cli_help_text(argc > 0 ? argv[0] : ee::kApplicationName));
     return EXIT_SUCCESS;
   }
   if (args.show_version) {
-    ee::log::info(std::format("{} {}", kApplicationName, kApplicationVersion));
+    ee::log::info(std::format("{} {}", ee::kApplicationName, ee::kApplicationVersion));
     return EXIT_SUCCESS;
   }
 

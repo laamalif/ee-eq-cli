@@ -35,6 +35,12 @@ namespace ee {
 
 class PipeWireRouter {
  public:
+  struct RuntimeSnapshot {
+    std::string sink_name;
+    uint64_t sink_serial = 0;
+    std::vector<std::string> active_plugins;
+  };
+
   struct NodeData;
   struct LinkState {
     pw_proxy* proxy = nullptr;
@@ -54,6 +60,7 @@ class PipeWireRouter {
   auto start(std::string& error) -> bool;
   void stop();
   auto list_sinks(std::string& error) -> std::vector<std::string>;
+  auto runtime_snapshot() const -> RuntimeSnapshot;
   auto wake_fd() const -> int;
   auto next_task_timeout() const -> std::optional<std::chrono::milliseconds>;
   void run_due_tasks();

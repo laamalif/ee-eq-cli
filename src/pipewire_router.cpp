@@ -1062,6 +1062,17 @@ auto PipeWireRouter::list_sinks(std::string& error) -> std::vector<std::string> 
   return result;
 }
 
+auto PipeWireRouter::runtime_snapshot() const -> RuntimeSnapshot {
+  RuntimeSnapshot snapshot;
+  {
+    std::scoped_lock lock(state_mutex_);
+    snapshot.sink_name = selected_sink_.name;
+    snapshot.sink_serial = selected_sink_.serial;
+  }
+  snapshot.active_plugins = preset_.plugin_order;
+  return snapshot;
+}
+
 void PipeWireRouter::stop() {
   if (shutting_down_) {
     return;

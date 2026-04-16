@@ -22,6 +22,10 @@ add_executable(ee-eq-cli)
 target_sources(ee-eq-cli PRIVATE
     src/main.cpp
     src/cli_args.cpp
+    src/daemon_controller.cpp
+    src/daemon_ipc.cpp
+    src/daemon_protocol.cpp
+    src/daemon_backend.cpp
     src/preset_source.cpp
     src/ee_eq_preset_parser.cpp
     src/lsp_eq_port_mapper.cpp
@@ -74,4 +78,25 @@ if(BUILD_TESTING)
         EE_EQ_CLI_TEST_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures"
     )
     add_test(NAME ee-eq-cli-tests COMMAND ee-eq-cli-tests)
+
+    add_executable(ee-eq-cli-daemon-tests)
+    target_sources(ee-eq-cli-daemon-tests PRIVATE
+        tests/test_daemon.cpp
+        src/daemon_controller.cpp
+        src/daemon_ipc.cpp
+        src/daemon_protocol.cpp
+        src/preset_source.cpp
+        src/ee_eq_preset_parser.cpp
+    )
+    target_include_directories(ee-eq-cli-daemon-tests PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/src
+        ${EE_CORE_INCLUDE_DIR}
+    )
+    target_link_libraries(ee-eq-cli-daemon-tests PRIVATE
+        PkgConfig::LIBNLOHMANNJSON
+    )
+    target_compile_definitions(ee-eq-cli-daemon-tests PRIVATE
+        EE_EQ_CLI_TEST_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures"
+    )
+    add_test(NAME ee-eq-cli-daemon-tests COMMAND ee-eq-cli-daemon-tests)
 endif()

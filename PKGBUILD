@@ -1,7 +1,7 @@
 # Maintainer: local
 
 pkgname=ee-eq-cli
-pkgver=0.2.10.1
+pkgver=0.3.0
 pkgrel=1
 pkgdesc='Minimal headless EasyEffects-compatible EQ preset loader for PipeWire/LV2'
 arch=(x86_64 aarch64)
