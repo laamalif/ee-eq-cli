@@ -58,7 +58,7 @@ class RealSessionBackend final : public SessionBackend {
     stop_requested_.store(true, std::memory_order_release);
     if (stop_fd_ != -1) {
       uint64_t signal = 1;
-      (void)write(stop_fd_, &signal, sizeof(signal));
+      [[maybe_unused]] const auto _ = write(stop_fd_, &signal, sizeof(signal));
     }
     if (worker_.joinable()) {
       worker_.join();
@@ -123,7 +123,7 @@ class RealSessionBackend final : public SessionBackend {
 
       if ((poll_fds[0].revents & POLLIN) != 0) {
         uint64_t ignored = 0;
-        (void)read(stop_fd_, &ignored, sizeof(ignored));
+        [[maybe_unused]] const auto _ = read(stop_fd_, &ignored, sizeof(ignored));
         break;
       }
 
