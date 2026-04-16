@@ -464,6 +464,54 @@ void test_stale_socket_recovery() {
   server.join();
 }
 
+void test_switch_sink() {
+  ee::log::info("daemon-test: switch_sink");
+  auto harness = start_daemon_harness();
+  ee::DaemonResponse response;
+  std::string error;
+
+  expect(ee::send_daemon_request(
+             ee::DaemonRequest{.command = "apply", .preset_path = fixture_path("Boosted.json")},
+             response,
+             error),
+         "apply should succeed before switch-sink");
+  expect(response.ok, "apply response should be ok before switch-sink");
+  expect(response.status.effective.sink_name == "fake_sink", "initial sink should be fake_sink");
+
+  {
+    std::scoped_lock lock(harness->state->mutex);
+    harness->state->sink_name = "other_sink";
+    harness->state->sink_serial = 99;
+  }
+
+  expect(ee::send_daemon_request(
+             ee::DaemonRequest{.command = "switch-sink", .sink_selector = "other_sink"},
+             response,
+             error),
+         "switch-sink request should succeed");
+  expect(response.ok, "switch-sink response should be ok");
+  expect(response.status.effective.sink_name == "other_sink",
+         "switch-sink should update effective sink name");
+  expect(response.status.effective.sink_serial == 99,
+         "switch-sink should update effective sink serial");
+  expect(response.status.desired.sink_selector == "other_sink",
+         "switch-sink should update desired sink selector");
+}
+
+void test_switch_sink_no_preset() {
+  ee::log::info("daemon-test: switch_sink_no_preset");
+  auto harness = start_daemon_harness();
+  ee::DaemonResponse response;
+  std::string error;
+
+  expect(ee::send_daemon_request(
+             ee::DaemonRequest{.command = "switch-sink", .sink_selector = "some_sink"},
+             response,
+             error),
+         "switch-sink request should return a response");
+  expect(!response.ok, "switch-sink without prior apply should fail");
+}
+
 }  // namespace
 
 int main() {
@@ -471,6 +519,8 @@ int main() {
   test_apply_disable_enable_cycle();
   test_runtime_apply_failure_rolls_back();
   test_status_refreshes_effective_sink();
+  test_switch_sink();
+  test_switch_sink_no_preset();
   test_daemon_single_instance_refusal();
   test_stale_socket_recovery();
 

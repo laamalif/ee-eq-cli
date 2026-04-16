@@ -52,6 +52,9 @@ auto DaemonController::handle_request(const DaemonRequest& request) -> DaemonRes
   if (request.command == "disable") {
     return disable_locked();
   }
+  if (request.command == "switch-sink") {
+    return switch_sink_locked(request);
+  }
   if (request.command == "list-sinks") {
     return list_sinks_locked();
   }
@@ -201,6 +204,48 @@ auto DaemonController::list_sinks_locked() -> DaemonResponse {
     return {.ok = false, .error = error, .status = status_locked()};
   }
   return {.ok = true, .status = status_locked(), .sinks = sinks};
+}
+
+auto DaemonController::switch_sink_locked(const DaemonRequest& request) -> DaemonResponse {
+  if (!desired_.has_value()) {
+    return {.ok = false, .error = "no preset loaded; use apply first", .status = status_locked()};
+  }
+  if (request.sink_selector.empty()) {
+    return {.ok = false, .error = "switch-sink requires a sink name or serial", .status = status_locked()};
+  }
+
+  const auto previous_sink = desired_->sink_selector;
+  desired_->sink_selector = request.sink_selector;
+  status_.session_state = SessionLifecycleState::Enabling;
+
+  if (desired_->enabled) {
+    backend_->stop_session();
+  }
+
+  std::string error;
+  if (!backend_->start_session(desired_->preset, desired_->preset_origin, desired_->sink_selector, error)) {
+    desired_->sink_selector = previous_sink;
+    if (desired_->enabled) {
+      std::string rollback_error;
+      if (backend_->start_session(desired_->preset, desired_->preset_origin, previous_sink, rollback_error)) {
+        set_runtime_state_from_backend_locked();
+        status_.health = HealthState::Degraded;
+        status_.last_error = error;
+        return {.ok = false, .error = error, .status = status_locked()};
+      }
+    }
+    clear_effective_state_locked();
+    status_.session_state = SessionLifecycleState::Degraded;
+    status_.health = HealthState::Degraded;
+    status_.last_error = error;
+    return {.ok = false, .error = error, .status = status_locked()};
+  }
+
+  desired_->enabled = true;
+  set_runtime_state_from_backend_locked();
+  status_.health = HealthState::Ok;
+  status_.last_error.clear();
+  return {.ok = true, .status = status_locked()};
 }
 
 auto DaemonController::shutdown_locked() -> DaemonResponse {

@@ -25,13 +25,16 @@ Optional flags:
 Run as a long-lived daemon and control sessions over a Unix socket:
 
 ```bash
-ee-eq-cli daemon start
+ee-eq-cli daemon start [--preset /path/to/preset.json] [--sink <name-or-serial>]
 ```
+
+When `--preset` is provided (or `EE_EQ_CLI_DEFAULT_PRESET` is set), the daemon auto-applies the preset on startup.
 
 Then from another terminal:
 
 ```bash
 ee-eq-cli apply /path/to/preset.json [--sink <name-or-serial>]
+ee-eq-cli switch-sink <name-or-serial>
 ee-eq-cli status
 ee-eq-cli health
 ee-eq-cli current-sink

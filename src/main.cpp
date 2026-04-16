@@ -143,8 +143,8 @@ auto handle_daemon_mode(const std::vector<std::string>& arguments) -> std::optio
   };
 
   if (arguments[1] == "daemon") {
-    if (arguments.size() != 3 || arguments[2] != "start") {
-      ee::log::error("usage: ee-eq-cli daemon start");
+    if (arguments.size() < 3 || arguments[2] != "start") {
+      ee::log::error("usage: ee-eq-cli daemon start [--preset <path>] [--sink <name>]");
       return EXIT_FAILURE;
     }
     if (const auto env_error = ee::daemon_mode_environment_error(); !env_error.empty()) {
@@ -152,8 +152,45 @@ auto handle_daemon_mode(const std::vector<std::string>& arguments) -> std::optio
       return EXIT_FAILURE;
     }
 
+    std::string initial_preset;
+    std::string initial_sink;
+    for (size_t i = 3; i < arguments.size(); ++i) {
+      if (arguments[i] == "--preset" || arguments[i] == "-p") {
+        if (i + 1 >= arguments.size()) {
+          ee::log::error("missing value for --preset");
+          return EXIT_FAILURE;
+        }
+        initial_preset = arguments[++i];
+      } else if (arguments[i] == "--sink" || arguments[i] == "-s") {
+        if (i + 1 >= arguments.size()) {
+          ee::log::error("missing value for --sink");
+          return EXIT_FAILURE;
+        }
+        initial_sink = arguments[++i];
+      } else {
+        ee::log::error(std::format("unknown option: {}", arguments[i]));
+        return EXIT_FAILURE;
+      }
+    }
+
+    if (initial_preset.empty()) {
+      if (const char* env = std::getenv("EE_EQ_CLI_DEFAULT_PRESET"); env != nullptr && *env != '\0') {
+        initial_preset = env;
+      }
+    }
+
     ee::DaemonController controller(
         ee::make_real_session_backend(), ee::kApplicationVersion, static_cast<int>(getpid()), utc_now_iso8601());
+
+    if (!initial_preset.empty()) {
+      const auto response = controller.handle_request(
+          ee::DaemonRequest{.command = "apply", .preset_path = initial_preset, .sink_selector = initial_sink});
+      if (!response.ok) {
+        ee::log::error(response.error);
+        return EXIT_FAILURE;
+      }
+    }
+
     std::string error;
     const int result = ee::run_daemon_ipc_server(controller, error);
     if (result != EXIT_SUCCESS) {
@@ -218,6 +255,20 @@ auto handle_daemon_mode(const std::vector<std::string>& arguments) -> std::optio
     }
 
     if (const auto response = send_request(request); response.has_value()) {
+      print_status_json(response->status);
+      return EXIT_SUCCESS;
+    }
+    return EXIT_FAILURE;
+  }
+
+  if (arguments[1] == "switch-sink") {
+    if (arguments.size() < 3) {
+      ee::log::error("usage: ee-eq-cli switch-sink <name-or-serial>");
+      return EXIT_FAILURE;
+    }
+    if (const auto response =
+            send_request(ee::DaemonRequest{.command = "switch-sink", .sink_selector = arguments[2]});
+        response.has_value()) {
       print_status_json(response->status);
       return EXIT_SUCCESS;
     }

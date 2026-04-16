@@ -33,6 +33,7 @@ class DaemonController {
   auto apply_locked(const DaemonRequest& request) -> DaemonResponse;
   auto enable_locked() -> DaemonResponse;
   auto disable_locked() -> DaemonResponse;
+  auto switch_sink_locked(const DaemonRequest& request) -> DaemonResponse;
   auto list_sinks_locked() -> DaemonResponse;
   auto shutdown_locked() -> DaemonResponse;
   void set_runtime_state_from_backend_locked();
