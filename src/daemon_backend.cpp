@@ -70,6 +70,12 @@ class RealSessionBackend final : public SessionBackend {
     preset_origin_.clear();
   }
 
+  void set_bypass(bool bypass) override {
+    if (router_) {
+      router_->set_bypass(bypass);
+    }
+  }
+
   auto list_sinks(std::string& error) -> std::vector<std::string> override {
     PipeWireRouter router(ParsedPreset{}, {});
     return router.list_sinks(error);
@@ -87,6 +93,7 @@ class RealSessionBackend final : public SessionBackend {
     snapshot.sink_name = runtime.sink_name;
     snapshot.sink_serial = runtime.sink_serial;
     snapshot.active_plugins = runtime.active_plugins;
+    snapshot.bypass = runtime.bypass;
     return snapshot;
   }
 

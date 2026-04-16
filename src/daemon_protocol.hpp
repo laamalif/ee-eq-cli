@@ -33,6 +33,7 @@ struct DesiredState {
   std::string preset_path;
   std::string sink_selector;
   bool enabled = false;
+  bool bypass = false;
 };
 
 struct EffectiveState {
@@ -41,6 +42,7 @@ struct EffectiveState {
   std::string sink_name;
   uint64_t sink_serial = 0;
   std::vector<std::string> active_plugins;
+  bool bypass = false;
 };
 
 struct DaemonStatus {

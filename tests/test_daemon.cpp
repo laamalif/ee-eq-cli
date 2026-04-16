@@ -88,6 +88,7 @@ struct FakeBackendState {
   uint64_t sink_serial = 7;
   std::vector<std::string> active_plugins = {"equalizer"};
   std::vector<std::string> sinks = {"fake_sink [serial 7]"};
+  bool bypass = false;
 };
 
 class FakeBackend final : public ee::SessionBackend {
@@ -114,6 +115,11 @@ class FakeBackend final : public ee::SessionBackend {
     state_->session_active = false;
   }
 
+  void set_bypass(bool bypass) override {
+    std::scoped_lock lock(state_->mutex);
+    state_->bypass = bypass;
+  }
+
   auto list_sinks(std::string& error) -> std::vector<std::string> override {
     std::scoped_lock lock(state_->mutex);
     error.clear();
@@ -128,6 +134,7 @@ class FakeBackend final : public ee::SessionBackend {
     snapshot.sink_name = state_->session_active ? state_->sink_name : "";
     snapshot.sink_serial = state_->session_active ? state_->sink_serial : 0;
     snapshot.active_plugins = state_->session_active ? state_->active_plugins : std::vector<std::string>{};
+    snapshot.bypass = state_->bypass;
     return snapshot;
   }
 
@@ -498,6 +505,87 @@ void test_switch_sink() {
          "switch-sink should update desired sink selector");
 }
 
+void test_bypass_on_off() {
+  ee::log::info("daemon-test: bypass_on_off");
+  auto harness = start_daemon_harness();
+  ee::DaemonResponse response;
+  std::string error;
+
+  expect(ee::send_daemon_request(
+             ee::DaemonRequest{.command = "apply", .preset_path = fixture_path("Boosted.json")},
+             response,
+             error),
+         "apply should succeed before bypass test");
+  expect(response.ok, "apply response should be ok before bypass test");
+
+  expect(ee::send_daemon_request(
+             ee::DaemonRequest{.command = "bypass", .sink_selector = "on"},
+             response,
+             error),
+         "bypass on request should succeed");
+  expect(response.ok, "bypass on response should be ok");
+  expect(response.status.desired.bypass, "bypass on should set desired bypass true");
+  expect(response.status.effective.bypass, "bypass on should set effective bypass true");
+
+  expect(ee::send_daemon_request(
+             ee::DaemonRequest{.command = "bypass", .sink_selector = "off"},
+             response,
+             error),
+         "bypass off request should succeed");
+  expect(response.ok, "bypass off response should be ok");
+  expect(!response.status.desired.bypass, "bypass off should set desired bypass false");
+  expect(!response.status.effective.bypass, "bypass off should set effective bypass false");
+}
+
+void test_bypass_no_session() {
+  ee::log::info("daemon-test: bypass_no_session");
+  auto harness = start_daemon_harness();
+  ee::DaemonResponse response;
+  std::string error;
+
+  expect(ee::send_daemon_request(
+             ee::DaemonRequest{.command = "bypass", .sink_selector = "on"},
+             response,
+             error),
+         "bypass request should return a response");
+  expect(!response.ok, "bypass without active session should fail");
+}
+
+void test_bypass_survives_switch_sink() {
+  ee::log::info("daemon-test: bypass_survives_switch_sink");
+  auto harness = start_daemon_harness();
+  ee::DaemonResponse response;
+  std::string error;
+
+  expect(ee::send_daemon_request(
+             ee::DaemonRequest{.command = "apply", .preset_path = fixture_path("Boosted.json")},
+             response,
+             error),
+         "apply should succeed");
+  expect(response.ok, "apply response should be ok");
+
+  expect(ee::send_daemon_request(
+             ee::DaemonRequest{.command = "bypass", .sink_selector = "on"},
+             response,
+             error),
+         "bypass on should succeed");
+  expect(response.ok, "bypass on response should be ok");
+
+  {
+    std::scoped_lock lock(harness->state->mutex);
+    harness->state->sink_name = "other_sink";
+    harness->state->sink_serial = 99;
+  }
+
+  expect(ee::send_daemon_request(
+             ee::DaemonRequest{.command = "switch-sink", .sink_selector = "other_sink"},
+             response,
+             error),
+         "switch-sink should succeed");
+  expect(response.ok, "switch-sink response should be ok");
+  expect(response.status.desired.bypass, "bypass should survive switch-sink");
+}
+
 void test_switch_sink_no_preset() {
   ee::log::info("daemon-test: switch_sink_no_preset");
   auto harness = start_daemon_harness();
@@ -521,6 +609,9 @@ int main() {
   test_status_refreshes_effective_sink();
   test_switch_sink();
   test_switch_sink_no_preset();
+  test_bypass_on_off();
+  test_bypass_no_session();
+  test_bypass_survives_switch_sink();
   test_daemon_single_instance_refusal();
   test_stale_socket_recovery();
 

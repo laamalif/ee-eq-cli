@@ -15,6 +15,7 @@ struct RuntimeSnapshot {
   std::string sink_name;
   uint64_t sink_serial = 0;
   std::vector<std::string> active_plugins;
+  bool bypass = false;
 };
 
 class SessionBackend {
@@ -26,6 +27,7 @@ class SessionBackend {
                              std::string sink_selector,
                              std::string& error) -> bool = 0;
   virtual void stop_session() = 0;
+  virtual void set_bypass(bool bypass) = 0;
   virtual auto list_sinks(std::string& error) -> std::vector<std::string> = 0;
   [[nodiscard]] virtual auto snapshot() const -> RuntimeSnapshot = 0;
 };

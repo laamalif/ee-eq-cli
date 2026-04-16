@@ -275,6 +275,20 @@ auto handle_daemon_mode(const std::vector<std::string>& arguments) -> std::optio
     return EXIT_FAILURE;
   }
 
+  if (arguments[1] == "bypass") {
+    if (arguments.size() < 3) {
+      ee::log::error("usage: ee-eq-cli bypass on|off");
+      return EXIT_FAILURE;
+    }
+    if (const auto response =
+            send_request(ee::DaemonRequest{.command = "bypass", .sink_selector = arguments[2]});
+        response.has_value()) {
+      print_status_json(response->status);
+      return EXIT_SUCCESS;
+    }
+    return EXIT_FAILURE;
+  }
+
   if (arguments[1] == "enable" || arguments[1] == "disable" || arguments[1] == "list-sinks" || arguments[1] == "shutdown") {
     const std::string command =
         arguments[1] == "list-sinks" ? "list-sinks" : arguments[1] == "shutdown" ? "shutdown" : arguments[1];

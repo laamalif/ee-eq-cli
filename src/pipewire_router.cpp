@@ -220,6 +220,9 @@ class PipeWireRouter::EqFilterNode {
     return node_id_;
   }
 
+  void set_bypass(bool value) { bypass_.store(value, std::memory_order_relaxed); }
+  auto is_bypass() const -> bool { return bypass_.load(std::memory_order_relaxed); }
+
  private:
   static void on_filter_state_changed(void* userdata,
                                       [[maybe_unused]] pw_filter_state old_state,
@@ -259,7 +262,7 @@ class PipeWireRouter::EqFilterNode {
     std::span<float> right_out =
         out_right != nullptr ? std::span<float>(out_right, n_samples) : std::span<float>(self->dummy_right_);
 
-    if (self->preset_.bypass) {
+    if (self->bypass_.load(std::memory_order_relaxed) || self->preset_.bypass) {
       std::ranges::copy(left_in, left_out.begin());
       std::ranges::copy(right_in, right_out.begin());
       return;
@@ -330,6 +333,7 @@ class PipeWireRouter::EqFilterNode {
   std::atomic<pw_filter_state> state_{PW_FILTER_STATE_UNCONNECTED};
   std::atomic<float> input_gain_{static_cast<float>(ee::math::db_to_linear(preset_.input_gain_db))};
   std::atomic<float> output_gain_{static_cast<float>(ee::math::db_to_linear(preset_.output_gain_db))};
+  std::atomic<bool> bypass_{false};
   std::vector<float> scratch_left_;
   std::vector<float> scratch_right_;
   std::vector<float> dummy_left_;
@@ -457,6 +461,8 @@ class PipeWireRouter::LimiterFilterNode {
     return node_id_;
   }
 
+  void set_bypass(bool value) { bypass_.store(value, std::memory_order_relaxed); }
+
  private:
   static void on_filter_state_changed(void* userdata,
                                       [[maybe_unused]] pw_filter_state old_state,
@@ -502,7 +508,7 @@ class PipeWireRouter::LimiterFilterNode {
     std::span<float> right_out =
         out_right != nullptr ? std::span<float>(out_right, n_samples) : std::span<float>(self->dummy_right_);
 
-    if (self->preset_.bypass) {
+    if (self->bypass_.load(std::memory_order_relaxed) || self->preset_.bypass) {
       std::ranges::copy(left_in, left_out.begin());
       std::ranges::copy(right_in, right_out.begin());
       return;
@@ -575,6 +581,7 @@ class PipeWireRouter::LimiterFilterNode {
   std::atomic<pw_filter_state> state_{PW_FILTER_STATE_UNCONNECTED};
   std::atomic<float> input_gain_{static_cast<float>(ee::math::db_to_linear(preset_.input_gain_db))};
   std::atomic<float> output_gain_{static_cast<float>(ee::math::db_to_linear(preset_.output_gain_db))};
+  std::atomic<bool> bypass_{false};
   std::vector<float> scratch_left_;
   std::vector<float> scratch_right_;
   std::vector<float> dummy_left_;
@@ -699,6 +706,8 @@ class PipeWireRouter::ConvolverFilterNode {
 
   auto node_id() const -> uint32_t { return node_id_; }
 
+  void set_bypass(bool value) { bypass_.store(value, std::memory_order_relaxed); }
+
  private:
   static void on_filter_state_changed(void* userdata,
                                       [[maybe_unused]] pw_filter_state old_state,
@@ -734,7 +743,7 @@ class PipeWireRouter::ConvolverFilterNode {
     std::span<float> right_out =
         out_right != nullptr ? std::span<float>(out_right, n_samples) : std::span<float>(self->dummy_right_);
 
-    if (self->preset_.bypass) {
+    if (self->bypass_.load(std::memory_order_relaxed) || self->preset_.bypass) {
       std::ranges::copy(left_in, left_out.begin());
       std::ranges::copy(right_in, right_out.begin());
       return;
@@ -822,6 +831,7 @@ class PipeWireRouter::ConvolverFilterNode {
   std::atomic<float> output_gain_{static_cast<float>(ee::math::db_to_linear(preset_.output_gain_db))};
   std::atomic<float> dry_{preset_.dry_db <= ee::math::minimum_db_level ? 0.0F : static_cast<float>(ee::math::db_to_linear(preset_.dry_db))};
   std::atomic<float> wet_{preset_.wet_db <= ee::math::minimum_db_level ? 0.0F : static_cast<float>(ee::math::db_to_linear(preset_.wet_db))};
+  std::atomic<bool> bypass_{false};
   std::vector<float> scratch_left_;
   std::vector<float> scratch_right_;
   std::vector<float> input_left_;
@@ -1070,7 +1080,14 @@ auto PipeWireRouter::runtime_snapshot() const -> RuntimeSnapshot {
     snapshot.sink_serial = selected_sink_.serial;
   }
   snapshot.active_plugins = preset_.plugin_order;
+  snapshot.bypass = eq_filter_ ? eq_filter_->is_bypass() : false;
   return snapshot;
+}
+
+void PipeWireRouter::set_bypass(bool bypass) {
+  if (eq_filter_) eq_filter_->set_bypass(bypass);
+  if (limiter_filter_) limiter_filter_->set_bypass(bypass);
+  if (convolver_filter_) convolver_filter_->set_bypass(bypass);
 }
 
 void PipeWireRouter::stop() {

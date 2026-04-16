@@ -152,7 +152,8 @@ auto cli_help_text(std::string_view executable_name) -> std::string {
       "Daemon mode:\n"
       "      {} daemon start [--preset <path>] [--sink <name>]\n"
       "      {} status|health|current-sink|apply <preset>|enable|disable|list-sinks|shutdown\n"
-      "      {} switch-sink <name-or-serial>\n\n"
+      "      {} switch-sink <name-or-serial>\n"
+      "      {} bypass on|off\n\n"
       "Options:\n"
       "  -p, --preset <preset>  Local EasyEffects EQ preset path.\n"
       "      --convert-autoeq <text>\n"
@@ -167,6 +168,7 @@ auto cli_help_text(std::string_view executable_name) -> std::string {
       "Advanced environment:\n"
       "      EE_EQ_CLI_DEFAULT_PRESET  Fallback local preset path when --preset is omitted\n"
       "                                (standalone mode and daemon start).\n",
+      executable_name,
       executable_name,
       executable_name,
       executable_name,

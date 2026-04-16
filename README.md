@@ -35,6 +35,7 @@ Then from another terminal:
 ```bash
 ee-eq-cli apply /path/to/preset.json [--sink <name-or-serial>]
 ee-eq-cli switch-sink <name-or-serial>
+ee-eq-cli bypass on|off
 ee-eq-cli status
 ee-eq-cli health
 ee-eq-cli current-sink
