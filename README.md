@@ -20,6 +20,27 @@ Optional flags:
 - `--dry-run`
 - `--list-sinks`
 
+### Daemon Mode
+
+Run as a long-lived daemon and control sessions over a Unix socket:
+
+```bash
+ee-eq-cli daemon start
+```
+
+Then from another terminal:
+
+```bash
+ee-eq-cli apply /path/to/preset.json [--sink <name-or-serial>]
+ee-eq-cli status
+ee-eq-cli health
+ee-eq-cli current-sink
+ee-eq-cli enable
+ee-eq-cli disable
+ee-eq-cli list-sinks
+ee-eq-cli shutdown
+```
+
 ### AutoEQ Converter
 
 Convert AutoEQ parametric EQ text files to EasyEffects JSON:
