@@ -213,12 +213,11 @@ auto ConvolverHost::ensure_ready(uint32_t block_size) -> bool {
 }
 
 auto ConvolverHost::process(std::span<float> left, std::span<float> right) -> bool {
-  // Lock-free: acquire ready_ to synchronize with ensure_ready's release
-  if (!ready_.load(std::memory_order_acquire)) {
+  std::unique_lock lock(mutex_, std::try_to_lock);
+  if (!lock.owns_lock() || !ready_.load(std::memory_order_relaxed)) {
     return false;
   }
 
-  // After ready_ is true, conv_ is stable and won't be destroyed
   if (!conv_ || conv_->state() != Convproc::ST_PROC) {
     return false;
   }

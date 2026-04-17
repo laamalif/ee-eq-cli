@@ -225,6 +225,7 @@ class PipeWireRouter::EqFilterNode {
 
   void set_bypass(bool value) { bypass_.store(value, std::memory_order_relaxed); }
   auto is_bypass() const -> bool { return bypass_.load(std::memory_order_relaxed); }
+  auto is_ready() const -> bool { return init_state_.load(std::memory_order_relaxed) == InitState::Ready; }
   void set_volume_source(std::atomic<float>* vol) { volume_source_ = vol; }
 
  private:
@@ -336,6 +337,7 @@ class PipeWireRouter::EqFilterNode {
 
     if (!host_.create_instance(rate, frames)) {
       init_error_ = "LV2 EQ instantiation failed";
+      init_state_.store(InitState::Uninitialized, std::memory_order_release);
       return;
     }
 
@@ -505,6 +507,7 @@ class PipeWireRouter::LimiterFilterNode {
   }
 
   void set_bypass(bool value) { bypass_.store(value, std::memory_order_relaxed); }
+  auto is_ready() const -> bool { return init_state_.load(std::memory_order_relaxed) == InitState::Ready; }
   void set_volume_source(std::atomic<float>* vol) { volume_source_ = vol; }
 
  private:
@@ -615,6 +618,7 @@ class PipeWireRouter::LimiterFilterNode {
 
     if (!host_.create_instance(rate, frames)) {
       init_error_ = "LV2 limiter instantiation failed";
+      init_state_.store(InitState::Uninitialized, std::memory_order_release);
       return;
     }
 
@@ -791,6 +795,7 @@ class PipeWireRouter::ConvolverFilterNode {
   auto node_id() const -> uint32_t { return node_id_; }
 
   void set_bypass(bool value) { bypass_.store(value, std::memory_order_relaxed); }
+  auto is_ready() const -> bool { return init_state_.load(std::memory_order_relaxed) == InitState::Ready; }
   void set_volume_source(std::atomic<float>* vol) { volume_source_ = vol; }
 
  private:
@@ -921,11 +926,13 @@ class PipeWireRouter::ConvolverFilterNode {
     std::string rate_error;
     if (!host_.validate_rate(rate, rate_error)) {
       init_error_ = rate_error;
+      init_state_.store(InitState::Uninitialized, std::memory_order_release);
       return;
     }
 
     if (!host_.ensure_ready(frames)) {
       init_error_ = "Convolver initialization failed";
+      init_state_.store(InitState::Uninitialized, std::memory_order_release);
       return;
     }
 
@@ -1229,7 +1236,15 @@ auto PipeWireRouter::runtime_snapshot() const -> RuntimeSnapshot {
     snapshot.sink_name = selected_sink_.name;
     snapshot.sink_serial = selected_sink_.serial;
   }
-  snapshot.active_plugins = preset_.plugin_order;
+  for (const auto& plugin : preset_.plugin_order) {
+    if (plugin == "equalizer" && eq_filter_ && eq_filter_->is_ready()) {
+      snapshot.active_plugins.push_back(plugin);
+    } else if (plugin == "convolver" && convolver_filter_ && convolver_filter_->is_ready()) {
+      snapshot.active_plugins.push_back(plugin);
+    } else if (plugin == "limiter" && limiter_filter_ && limiter_filter_->is_ready()) {
+      snapshot.active_plugins.push_back(plugin);
+    }
+  }
   snapshot.bypass = eq_filter_ ? eq_filter_->is_bypass() : false;
   snapshot.volume = volume_.load(std::memory_order_relaxed);
   return snapshot;
@@ -1837,7 +1852,7 @@ void PipeWireRouter::reconnect_to_sink(const std::string& new_sink_name) {
 
   if (!connect_chain(error)) {
     log::error(std::format("failed to reconnect chain to {}: {}", new_sink_name, error));
-    // Rollback to old sink
+    destroy_links();
     std::scoped_lock lock(state_mutex_);
     selected_sink_ = old_sink;
     std::string rollback_error;
