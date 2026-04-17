@@ -224,23 +224,23 @@ auto DaemonController::switch_sink_locked(const DaemonRequest& request) -> Daemo
 
   const auto previous_sink = desired_->sink_selector;
   desired_->sink_selector = request.sink_selector;
-  status_.session_state = SessionLifecycleState::Enabling;
 
-  if (desired_->enabled) {
-    backend_->stop_session();
+  if (!desired_->enabled) {
+    return {.ok = true, .status = status_locked()};
   }
+
+  status_.session_state = SessionLifecycleState::Enabling;
+  backend_->stop_session();
 
   std::string error;
   if (!backend_->start_session(desired_->preset, desired_->preset_origin, desired_->sink_selector, error)) {
     desired_->sink_selector = previous_sink;
-    if (desired_->enabled) {
-      std::string rollback_error;
-      if (backend_->start_session(desired_->preset, desired_->preset_origin, previous_sink, rollback_error)) {
-        set_runtime_state_from_backend_locked();
-        status_.health = HealthState::Degraded;
-        status_.last_error = error;
-        return {.ok = false, .error = error, .status = status_locked()};
-      }
+    std::string rollback_error;
+    if (backend_->start_session(desired_->preset, desired_->preset_origin, previous_sink, rollback_error)) {
+      set_runtime_state_from_backend_locked();
+      status_.health = HealthState::Degraded;
+      status_.last_error = error;
+      return {.ok = false, .error = error, .status = status_locked()};
     }
     clear_effective_state_locked();
     status_.session_state = SessionLifecycleState::Degraded;
@@ -249,7 +249,6 @@ auto DaemonController::switch_sink_locked(const DaemonRequest& request) -> Daemo
     return {.ok = false, .error = error, .status = status_locked()};
   }
 
-  desired_->enabled = true;
   if (desired_->bypass) {
     backend_->set_bypass(true);
   }

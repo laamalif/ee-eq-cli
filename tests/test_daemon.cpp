@@ -638,6 +638,38 @@ void test_bypass_survives_switch_sink() {
   expect(response.status.desired.bypass, "bypass should survive switch-sink");
 }
 
+void test_switch_sink_while_disabled() {
+  ee::log::info("daemon-test: switch_sink_while_disabled");
+  auto harness = start_daemon_harness();
+  ee::DaemonResponse response;
+  std::string error;
+
+  expect(ee::send_daemon_request(
+             ee::DaemonRequest{.command = "apply", .preset_path = fixture_path("Boosted.json")},
+             response,
+             error),
+         "apply should succeed");
+  expect(response.ok, "apply response should be ok");
+
+  expect(ee::send_daemon_request(ee::DaemonRequest{.command = "disable"}, response, error),
+         "disable should succeed");
+  expect(response.ok, "disable response should be ok");
+  expect(response.status.session_state == ee::SessionLifecycleState::Disabled, "session should be disabled");
+
+  expect(ee::send_daemon_request(
+             ee::DaemonRequest{.command = "switch-sink", .sink_selector = "other_sink"},
+             response,
+             error),
+         "switch-sink while disabled should succeed");
+  expect(response.ok, "switch-sink while disabled response should be ok");
+  expect(response.status.desired.sink_selector == "other_sink",
+         "switch-sink should update desired sink even while disabled");
+  expect(response.status.session_state == ee::SessionLifecycleState::Disabled,
+         "switch-sink should not re-enable a disabled session");
+  expect(!response.status.effective.session_active,
+         "switch-sink should not start a session while disabled");
+}
+
 void test_switch_sink_no_preset() {
   ee::log::info("daemon-test: switch_sink_no_preset");
   auto harness = start_daemon_harness();
@@ -652,6 +684,93 @@ void test_switch_sink_no_preset() {
   expect(!response.ok, "switch-sink without prior apply should fail");
 }
 
+void test_full_lifecycle() {
+  ee::log::info("daemon-test: full_lifecycle");
+  auto harness = start_daemon_harness();
+  ee::DaemonResponse response;
+  std::string error;
+
+  // 1. idle status
+  expect(ee::send_daemon_request(ee::DaemonRequest{.command = "status"}, response, error),
+         "lifecycle: status should succeed when idle");
+  expect(response.ok, "lifecycle: idle status should be ok");
+  expect(response.status.session_state == ee::SessionLifecycleState::Disabled, "lifecycle: idle session should be disabled");
+  expect(!response.status.effective.session_active, "lifecycle: idle should have no active session");
+
+  // 2. apply
+  expect(ee::send_daemon_request(
+             ee::DaemonRequest{.command = "apply", .preset_path = fixture_path("Boosted.json")},
+             response, error),
+         "lifecycle: apply should succeed");
+  expect(response.ok, "lifecycle: apply response should be ok");
+  expect(response.status.session_state == ee::SessionLifecycleState::Enabled, "lifecycle: apply should enable session");
+  expect(response.status.effective.session_active, "lifecycle: apply should have active session");
+  expect(response.status.desired.enabled, "lifecycle: apply should set desired enabled");
+
+  // 3. bypass on
+  expect(ee::send_daemon_request(
+             ee::DaemonRequest{.command = "bypass", .sink_selector = "on"},
+             response, error),
+         "lifecycle: bypass on should succeed");
+  expect(response.ok, "lifecycle: bypass on should be ok");
+  expect(response.status.desired.bypass, "lifecycle: desired bypass should be true");
+  expect(response.status.effective.bypass, "lifecycle: effective bypass should be true");
+
+  // 4. bypass off
+  expect(ee::send_daemon_request(
+             ee::DaemonRequest{.command = "bypass", .sink_selector = "off"},
+             response, error),
+         "lifecycle: bypass off should succeed");
+  expect(response.ok, "lifecycle: bypass off should be ok");
+  expect(!response.status.desired.bypass, "lifecycle: desired bypass should be false");
+  expect(!response.status.effective.bypass, "lifecycle: effective bypass should be false");
+
+  // 5. disable
+  expect(ee::send_daemon_request(ee::DaemonRequest{.command = "disable"}, response, error),
+         "lifecycle: disable should succeed");
+  expect(response.ok, "lifecycle: disable should be ok");
+  expect(response.status.session_state == ee::SessionLifecycleState::Disabled, "lifecycle: disable should set disabled");
+  expect(!response.status.effective.session_active, "lifecycle: disable should stop session");
+
+  // 6. switch-sink while disabled — should not re-enable
+  {
+    std::scoped_lock lock(harness->state->mutex);
+    harness->state->sink_name = "switched_sink";
+    harness->state->sink_serial = 55;
+  }
+  expect(ee::send_daemon_request(
+             ee::DaemonRequest{.command = "switch-sink", .sink_selector = "switched_sink"},
+             response, error),
+         "lifecycle: switch-sink while disabled should succeed");
+  expect(response.ok, "lifecycle: switch-sink while disabled should be ok");
+  expect(response.status.session_state == ee::SessionLifecycleState::Disabled,
+         "lifecycle: switch-sink should preserve disabled state");
+  expect(response.status.desired.sink_selector == "switched_sink",
+         "lifecycle: switch-sink should update desired sink");
+  expect(!response.status.effective.session_active,
+         "lifecycle: switch-sink should not start session while disabled");
+
+  // 7. enable — should use the new sink
+  expect(ee::send_daemon_request(ee::DaemonRequest{.command = "enable"}, response, error),
+         "lifecycle: enable should succeed");
+  expect(response.ok, "lifecycle: enable should be ok");
+  expect(response.status.session_state == ee::SessionLifecycleState::Enabled, "lifecycle: enable should re-enable session");
+  expect(response.status.effective.session_active, "lifecycle: enable should have active session");
+  expect(response.status.effective.sink_name == "switched_sink",
+         "lifecycle: enable should use the sink set during disable");
+
+  // 8. status — verify consistent state
+  expect(ee::send_daemon_request(ee::DaemonRequest{.command = "status"}, response, error),
+         "lifecycle: final status should succeed");
+  expect(response.ok, "lifecycle: final status should be ok");
+  expect(response.status.session_state == ee::SessionLifecycleState::Enabled, "lifecycle: final session should be enabled");
+  expect(response.status.health == ee::HealthState::Ok, "lifecycle: final health should be ok");
+
+  // 9. current-sink (via status) — verify sink is correct
+  expect(response.status.effective.sink_name == "switched_sink", "lifecycle: current sink should be switched_sink");
+  expect(response.status.effective.sink_serial == 55, "lifecycle: current sink serial should be 55");
+}
+
 }  // namespace
 
 int main() {
@@ -660,6 +779,7 @@ int main() {
   test_runtime_apply_failure_rolls_back();
   test_status_refreshes_effective_sink();
   test_switch_sink();
+  test_switch_sink_while_disabled();
   test_switch_sink_no_preset();
   test_bypass_on_off();
   test_bypass_no_session();
@@ -668,6 +788,7 @@ int main() {
   test_bypass_survives_switch_sink();
   test_daemon_single_instance_refusal();
   test_stale_socket_recovery();
+  test_full_lifecycle();
 
   if (g_failures != 0) {
     ee::log::error(std::format("{} daemon test assertion(s) failed", g_failures));
