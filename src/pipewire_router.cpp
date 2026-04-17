@@ -121,8 +121,10 @@ void PipeWireRouter::free_node_info(NodeData* node) {
 
 class PipeWireRouter::EqFilterNode {
  public:
-  EqFilterNode(pw_core* core, pw_thread_loop* thread_loop, const EqPreset& preset)
-      : core_(core), thread_loop_(thread_loop), preset_(preset), host_(kEqPluginUri) {}
+  enum class InitState : uint8_t { Uninitialized, InitPending, Ready };
+
+  EqFilterNode(PipeWireRouter* router, pw_core* core, pw_thread_loop* thread_loop, const EqPreset& preset)
+      : router_(router), core_(core), thread_loop_(thread_loop), preset_(preset), host_(kEqPluginUri) {}
 
   ~EqFilterNode() {
     disconnect();
@@ -243,53 +245,58 @@ class PipeWireRouter::EqFilterNode {
       return;
     }
 
-    self->ensure_instance(rate, n_samples);
-
     auto* in_left = static_cast<float*>(pw_filter_get_dsp_buffer(self->left_in_, n_samples));
     auto* in_right = static_cast<float*>(pw_filter_get_dsp_buffer(self->right_in_, n_samples));
     auto* out_left = static_cast<float*>(pw_filter_get_dsp_buffer(self->left_out_, n_samples));
     auto* out_right = static_cast<float*>(pw_filter_get_dsp_buffer(self->right_out_, n_samples));
 
-    self->scratch_left_.resize(n_samples);
-    self->scratch_right_.resize(n_samples);
-    self->dummy_left_.assign(n_samples, 0.0F);
-    self->dummy_right_.assign(n_samples, 0.0F);
+    // Use pre-allocated dummy buffers if pointers are null
+    std::span<float> left_in = in_left != nullptr ? std::span<float>(in_left, n_samples)
+                                                   : std::span<float>(self->dummy_left_).subspan(0, n_samples);
+    std::span<float> right_in = in_right != nullptr ? std::span<float>(in_right, n_samples)
+                                                     : std::span<float>(self->dummy_right_).subspan(0, n_samples);
+    std::span<float> left_out = out_left != nullptr ? std::span<float>(out_left, n_samples)
+                                                     : std::span<float>(self->dummy_left_).subspan(0, n_samples);
+    std::span<float> right_out = out_right != nullptr ? std::span<float>(out_right, n_samples)
+                                                       : std::span<float>(self->dummy_right_).subspan(0, n_samples);
 
-    std::span<float> left_in = in_left != nullptr ? std::span<float>(in_left, n_samples) : std::span<float>(self->dummy_left_);
-    std::span<float> right_in =
-        in_right != nullptr ? std::span<float>(in_right, n_samples) : std::span<float>(self->dummy_right_);
-    std::span<float> left_out =
-        out_left != nullptr ? std::span<float>(out_left, n_samples) : std::span<float>(self->dummy_left_);
-    std::span<float> right_out =
-        out_right != nullptr ? std::span<float>(out_right, n_samples) : std::span<float>(self->dummy_right_);
+    // Check initialization state
+    const auto state = self->init_state_.load(std::memory_order_acquire);
+    if (state != InitState::Ready) {
+      // Output passthrough while initializing
+      std::ranges::copy(left_in, left_out.begin());
+      std::ranges::copy(right_in, right_out.begin());
 
+      if (state == InitState::Uninitialized) {
+        self->init_state_.store(InitState::InitPending, std::memory_order_relaxed);
+        self->schedule_initialization(rate, n_samples);
+      }
+      return;
+    }
+
+    // Ready — process normally
     if (self->bypass_.load(std::memory_order_relaxed) || self->preset_.bypass) {
       std::ranges::copy(left_in, left_out.begin());
       std::ranges::copy(right_in, right_out.begin());
     } else {
-      std::ranges::copy(left_in, self->scratch_left_.begin());
-      std::ranges::copy(right_in, self->scratch_right_.begin());
+      // Use pre-allocated scratch buffers (no allocation)
+      auto scratch_left = std::span<float>(self->scratch_left_).subspan(0, n_samples);
+      auto scratch_right = std::span<float>(self->scratch_right_).subspan(0, n_samples);
+
+      std::ranges::copy(left_in, scratch_left.begin());
+      std::ranges::copy(right_in, scratch_right.begin());
+
+      const auto in_gain = self->input_gain_.load(std::memory_order_relaxed);
+      if (in_gain != 1.0F) {
+        self->apply_gain(scratch_left, scratch_right, in_gain);
+      }
+
+      self->host_.connect_audio_ports(scratch_left, scratch_right, left_out, right_out);
+      self->host_.run();
 
       const auto out_gain = self->output_gain_.load(std::memory_order_relaxed);
-      const auto in_gain = self->input_gain_.load(std::memory_order_relaxed);
-
-      if (!self->ready_) {
-        std::ranges::copy(self->scratch_left_, left_out.begin());
-        std::ranges::copy(self->scratch_right_, right_out.begin());
-        if (out_gain != 1.0F) {
-          self->apply_gain(left_out, right_out, out_gain);
-        }
-      } else {
-        if (in_gain != 1.0F) {
-          self->apply_gain(self->scratch_left_, self->scratch_right_, in_gain);
-        }
-
-        self->host_.connect_audio_ports(self->scratch_left_, self->scratch_right_, left_out, right_out);
-        self->host_.run();
-
-        if (out_gain != 1.0F) {
-          self->apply_gain(left_out, right_out, out_gain);
-        }
+      if (out_gain != 1.0F) {
+        self->apply_gain(left_out, right_out, out_gain);
       }
     }
 
@@ -301,19 +308,6 @@ class PipeWireRouter::EqFilterNode {
     }
   }
 
-  void ensure_instance(uint32_t rate, uint32_t n_samples) {
-    if (ready_ && rate == rate_ && n_samples == n_samples_) {
-      return;
-    }
-
-    rate_ = rate;
-    n_samples_ = n_samples;
-    ready_ = host_.create_instance(rate_, n_samples_);
-    if (ready_) {
-      apply_eq_preset_to_host(preset_, host_);
-    }
-  }
-
   void apply_gain(std::span<float> left, std::span<float> right, const float gain) const {
     for (size_t i = 0; i < left.size(); ++i) {
       left[i] *= gain;
@@ -321,6 +315,35 @@ class PipeWireRouter::EqFilterNode {
     }
   }
 
+  void schedule_initialization(uint32_t rate, uint32_t frames) {
+    rate_ = rate;
+    n_samples_ = frames;
+    router_->schedule_task(std::chrono::milliseconds(0), [this, rate, frames]() {
+      initialize_on_worker(rate, frames);
+    });
+  }
+
+  void initialize_on_worker(uint32_t rate, uint32_t frames) {
+    const uint32_t max_frames = std::max(frames, 8192u);
+
+    if (!host_.create_instance(rate, max_frames)) {
+      init_error_ = "LV2 EQ instantiation failed";
+      return;
+    }
+
+    apply_eq_preset_to_host(preset_, host_);
+
+    scratch_left_.resize(max_frames);
+    scratch_right_.resize(max_frames);
+    dummy_left_.resize(max_frames);
+    dummy_right_.resize(max_frames);
+    allocated_frames_ = max_frames;
+    init_error_.clear();
+
+    init_state_.store(InitState::Ready, std::memory_order_release);
+  }
+
+  PipeWireRouter* router_ = nullptr;
   pw_core* core_ = nullptr;
   pw_thread_loop* thread_loop_ = nullptr;
   EqPreset preset_;
@@ -334,7 +357,9 @@ class PipeWireRouter::EqFilterNode {
   uint32_t node_id_ = SPA_ID_INVALID;
   uint32_t rate_ = 0;
   uint32_t n_samples_ = 0;
-  bool ready_ = false;
+  std::atomic<InitState> init_state_{InitState::Uninitialized};
+  uint32_t allocated_frames_ = 0;
+  std::string init_error_;
   std::atomic<bool> can_get_node_id_{false};
   std::atomic<pw_filter_state> state_{PW_FILTER_STATE_UNCONNECTED};
   std::atomic<float> input_gain_{static_cast<float>(ee::math::db_to_linear(preset_.input_gain_db))};
@@ -362,8 +387,10 @@ class PipeWireRouter::EqFilterNode {
 
 class PipeWireRouter::LimiterFilterNode {
  public:
-  LimiterFilterNode(pw_core* core, pw_thread_loop* thread_loop, const LimiterPreset& preset)
-      : core_(core), thread_loop_(thread_loop), preset_(preset), host_(kLimiterPluginUri) {}
+  enum class InitState : uint8_t { Uninitialized, InitPending, Ready };
+
+  LimiterFilterNode(PipeWireRouter* router, pw_core* core, pw_thread_loop* thread_loop, const LimiterPreset& preset)
+      : router_(router), core_(core), thread_loop_(thread_loop), preset_(preset), host_(kLimiterPluginUri) {}
 
   ~LimiterFilterNode() {
     disconnect();
@@ -490,8 +517,6 @@ class PipeWireRouter::LimiterFilterNode {
       return;
     }
 
-    self->ensure_instance(rate, n_samples);
-
     auto* in_left = static_cast<float*>(pw_filter_get_dsp_buffer(self->left_in_, n_samples));
     auto* in_right = static_cast<float*>(pw_filter_get_dsp_buffer(self->right_in_, n_samples));
     auto* probe_left = static_cast<float*>(pw_filter_get_dsp_buffer(self->probe_left_, n_samples));
@@ -499,50 +524,57 @@ class PipeWireRouter::LimiterFilterNode {
     auto* out_left = static_cast<float*>(pw_filter_get_dsp_buffer(self->left_out_, n_samples));
     auto* out_right = static_cast<float*>(pw_filter_get_dsp_buffer(self->right_out_, n_samples));
 
-    self->scratch_left_.resize(n_samples);
-    self->scratch_right_.resize(n_samples);
-    self->dummy_left_.assign(n_samples, 0.0F);
-    self->dummy_right_.assign(n_samples, 0.0F);
+    // Use pre-allocated dummy buffers if pointers are null
+    std::span<float> left_in = in_left != nullptr ? std::span<float>(in_left, n_samples)
+                                                   : std::span<float>(self->dummy_left_).subspan(0, n_samples);
+    std::span<float> right_in = in_right != nullptr ? std::span<float>(in_right, n_samples)
+                                                     : std::span<float>(self->dummy_right_).subspan(0, n_samples);
+    std::span<float> side_left = probe_left != nullptr ? std::span<float>(probe_left, n_samples)
+                                                        : std::span<float>(self->dummy_left_).subspan(0, n_samples);
+    std::span<float> side_right = probe_right != nullptr ? std::span<float>(probe_right, n_samples)
+                                                          : std::span<float>(self->dummy_right_).subspan(0, n_samples);
+    std::span<float> left_out = out_left != nullptr ? std::span<float>(out_left, n_samples)
+                                                     : std::span<float>(self->dummy_left_).subspan(0, n_samples);
+    std::span<float> right_out = out_right != nullptr ? std::span<float>(out_right, n_samples)
+                                                       : std::span<float>(self->dummy_right_).subspan(0, n_samples);
 
-    std::span<float> left_in = in_left != nullptr ? std::span<float>(in_left, n_samples) : std::span<float>(self->dummy_left_);
-    std::span<float> right_in =
-        in_right != nullptr ? std::span<float>(in_right, n_samples) : std::span<float>(self->dummy_right_);
-    std::span<float> side_left =
-        probe_left != nullptr ? std::span<float>(probe_left, n_samples) : std::span<float>(self->dummy_left_);
-    std::span<float> side_right =
-        probe_right != nullptr ? std::span<float>(probe_right, n_samples) : std::span<float>(self->dummy_right_);
-    std::span<float> left_out =
-        out_left != nullptr ? std::span<float>(out_left, n_samples) : std::span<float>(self->dummy_left_);
-    std::span<float> right_out =
-        out_right != nullptr ? std::span<float>(out_right, n_samples) : std::span<float>(self->dummy_right_);
+    // Check initialization state
+    const auto state = self->init_state_.load(std::memory_order_acquire);
+    if (state != InitState::Ready) {
+      // Output passthrough while initializing
+      std::ranges::copy(left_in, left_out.begin());
+      std::ranges::copy(right_in, right_out.begin());
 
+      if (state == InitState::Uninitialized) {
+        self->init_state_.store(InitState::InitPending, std::memory_order_relaxed);
+        self->schedule_initialization(rate, n_samples);
+      }
+      return;
+    }
+
+    // Ready — process normally
     if (self->bypass_.load(std::memory_order_relaxed) || self->preset_.bypass) {
       std::ranges::copy(left_in, left_out.begin());
       std::ranges::copy(right_in, right_out.begin());
     } else {
-      std::ranges::copy(left_in, self->scratch_left_.begin());
-      std::ranges::copy(right_in, self->scratch_right_.begin());
+      // Use pre-allocated scratch buffers (no allocation)
+      auto scratch_left = std::span<float>(self->scratch_left_).subspan(0, n_samples);
+      auto scratch_right = std::span<float>(self->scratch_right_).subspan(0, n_samples);
+
+      std::ranges::copy(left_in, scratch_left.begin());
+      std::ranges::copy(right_in, scratch_right.begin());
+
+      const auto in_gain = self->input_gain_.load(std::memory_order_relaxed);
+      if (in_gain != 1.0F) {
+        self->apply_gain(scratch_left, scratch_right, in_gain);
+      }
+
+      self->host_.connect_audio_ports(scratch_left, scratch_right, left_out, right_out, side_left, side_right);
+      self->host_.run();
 
       const auto out_gain = self->output_gain_.load(std::memory_order_relaxed);
-      const auto in_gain = self->input_gain_.load(std::memory_order_relaxed);
-
-      if (!self->ready_) {
-        std::ranges::copy(self->scratch_left_, left_out.begin());
-        std::ranges::copy(self->scratch_right_, right_out.begin());
-        if (out_gain != 1.0F) {
-          self->apply_gain(left_out, right_out, out_gain);
-        }
-      } else {
-        if (in_gain != 1.0F) {
-          self->apply_gain(self->scratch_left_, self->scratch_right_, in_gain);
-        }
-
-        self->host_.connect_audio_ports(self->scratch_left_, self->scratch_right_, left_out, right_out, side_left, side_right);
-        self->host_.run();
-
-        if (out_gain != 1.0F) {
-          self->apply_gain(left_out, right_out, out_gain);
-        }
+      if (out_gain != 1.0F) {
+        self->apply_gain(left_out, right_out, out_gain);
       }
     }
 
@@ -554,17 +586,32 @@ class PipeWireRouter::LimiterFilterNode {
     }
   }
 
-  void ensure_instance(uint32_t rate, uint32_t n_samples) {
-    if (ready_ && rate == rate_ && n_samples == n_samples_) {
+  void schedule_initialization(uint32_t rate, uint32_t frames) {
+    rate_ = rate;
+    n_samples_ = frames;
+    router_->schedule_task(std::chrono::milliseconds(0), [this, rate, frames]() {
+      initialize_on_worker(rate, frames);
+    });
+  }
+
+  void initialize_on_worker(uint32_t rate, uint32_t frames) {
+    const uint32_t max_frames = std::max(frames, 8192u);
+
+    if (!host_.create_instance(rate, max_frames)) {
+      init_error_ = "LV2 limiter instantiation failed";
       return;
     }
 
-    rate_ = rate;
-    n_samples_ = n_samples;
-    ready_ = host_.create_instance(rate_, n_samples_);
-    if (ready_) {
-      apply_limiter_preset_to_host(preset_, host_);
-    }
+    apply_limiter_preset_to_host(preset_, host_);
+
+    scratch_left_.resize(max_frames);
+    scratch_right_.resize(max_frames);
+    dummy_left_.resize(max_frames);
+    dummy_right_.resize(max_frames);
+    allocated_frames_ = max_frames;
+    init_error_.clear();
+
+    init_state_.store(InitState::Ready, std::memory_order_release);
   }
 
   void apply_gain(std::span<float> left, std::span<float> right, const float gain) const {
@@ -574,6 +621,7 @@ class PipeWireRouter::LimiterFilterNode {
     }
   }
 
+  PipeWireRouter* router_ = nullptr;
   pw_core* core_ = nullptr;
   pw_thread_loop* thread_loop_ = nullptr;
   LimiterPreset preset_;
@@ -589,7 +637,9 @@ class PipeWireRouter::LimiterFilterNode {
   uint32_t node_id_ = SPA_ID_INVALID;
   uint32_t rate_ = 0;
   uint32_t n_samples_ = 0;
-  bool ready_ = false;
+  std::atomic<InitState> init_state_{InitState::Uninitialized};
+  uint32_t allocated_frames_ = 0;
+  std::string init_error_;
   std::atomic<bool> can_get_node_id_{false};
   std::atomic<pw_filter_state> state_{PW_FILTER_STATE_UNCONNECTED};
   std::atomic<float> input_gain_{static_cast<float>(ee::math::db_to_linear(preset_.input_gain_db))};
@@ -1003,7 +1053,7 @@ auto PipeWireRouter::start(std::string& error) -> bool {
     return false;
   }
 
-  eq_filter_ = std::make_unique<EqFilterNode>(core_, thread_loop_, preset_.equalizer);
+  eq_filter_ = std::make_unique<EqFilterNode>(this, core_, thread_loop_, preset_.equalizer);
   if (!eq_filter_->connect(error)) {
     stop();
     return false;
@@ -1025,7 +1075,7 @@ auto PipeWireRouter::start(std::string& error) -> bool {
   }
 
   if (preset_.limiter.has_value()) {
-    limiter_filter_ = std::make_unique<LimiterFilterNode>(core_, thread_loop_, *preset_.limiter);
+    limiter_filter_ = std::make_unique<LimiterFilterNode>(this, core_, thread_loop_, *preset_.limiter);
     if (!limiter_filter_->connect(error)) {
       stop();
       return false;
