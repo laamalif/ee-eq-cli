@@ -121,7 +121,7 @@ void PipeWireRouter::free_node_info(NodeData* node) {
 
 class PipeWireRouter::EqFilterNode {
  public:
-  enum class InitState : uint8_t { Uninitialized, InitPending, Ready };
+  enum class InitState : uint8_t { Uninitialized, InitPending, Ready, Failed };
 
   EqFilterNode(PipeWireRouter* router, pw_core* core, pw_thread_loop* thread_loop, const EqPreset& preset)
       : router_(router), core_(core), thread_loop_(thread_loop), preset_(preset), host_(kEqPluginUri),
@@ -226,6 +226,7 @@ class PipeWireRouter::EqFilterNode {
   void set_bypass(bool value) { bypass_.store(value, std::memory_order_relaxed); }
   auto is_bypass() const -> bool { return bypass_.load(std::memory_order_relaxed); }
   auto is_ready() const -> bool { return init_state_.load(std::memory_order_relaxed) == InitState::Ready; }
+  auto init_error() const -> const std::string& { return init_error_; }
   void set_volume_source(std::atomic<float>* vol) { volume_source_ = vol; }
 
  private:
@@ -337,7 +338,7 @@ class PipeWireRouter::EqFilterNode {
 
     if (!host_.create_instance(rate, frames)) {
       init_error_ = "LV2 EQ instantiation failed";
-      init_state_.store(InitState::Uninitialized, std::memory_order_release);
+      init_state_.store(InitState::Failed, std::memory_order_release);
       return;
     }
 
@@ -397,7 +398,7 @@ class PipeWireRouter::EqFilterNode {
 
 class PipeWireRouter::LimiterFilterNode {
  public:
-  enum class InitState : uint8_t { Uninitialized, InitPending, Ready };
+  enum class InitState : uint8_t { Uninitialized, InitPending, Ready, Failed };
 
   LimiterFilterNode(PipeWireRouter* router, pw_core* core, pw_thread_loop* thread_loop, const LimiterPreset& preset)
       : router_(router), core_(core), thread_loop_(thread_loop), preset_(preset), host_(kLimiterPluginUri),
@@ -508,6 +509,7 @@ class PipeWireRouter::LimiterFilterNode {
 
   void set_bypass(bool value) { bypass_.store(value, std::memory_order_relaxed); }
   auto is_ready() const -> bool { return init_state_.load(std::memory_order_relaxed) == InitState::Ready; }
+  auto init_error() const -> const std::string& { return init_error_; }
   void set_volume_source(std::atomic<float>* vol) { volume_source_ = vol; }
 
  private:
@@ -618,7 +620,7 @@ class PipeWireRouter::LimiterFilterNode {
 
     if (!host_.create_instance(rate, frames)) {
       init_error_ = "LV2 limiter instantiation failed";
-      init_state_.store(InitState::Uninitialized, std::memory_order_release);
+      init_state_.store(InitState::Failed, std::memory_order_release);
       return;
     }
 
@@ -687,7 +689,7 @@ class PipeWireRouter::LimiterFilterNode {
 
 class PipeWireRouter::ConvolverFilterNode {
  public:
-  enum class InitState : uint8_t { Uninitialized, InitPending, Ready };
+  enum class InitState : uint8_t { Uninitialized, InitPending, Ready, Failed };
 
   ConvolverFilterNode(PipeWireRouter* router,
                       pw_core* core,
@@ -796,6 +798,7 @@ class PipeWireRouter::ConvolverFilterNode {
 
   void set_bypass(bool value) { bypass_.store(value, std::memory_order_relaxed); }
   auto is_ready() const -> bool { return init_state_.load(std::memory_order_relaxed) == InitState::Ready; }
+  auto init_error() const -> const std::string& { return init_error_; }
   void set_volume_source(std::atomic<float>* vol) { volume_source_ = vol; }
 
  private:
@@ -926,13 +929,13 @@ class PipeWireRouter::ConvolverFilterNode {
     std::string rate_error;
     if (!host_.validate_rate(rate, rate_error)) {
       init_error_ = rate_error;
-      init_state_.store(InitState::Uninitialized, std::memory_order_release);
+      init_state_.store(InitState::Failed, std::memory_order_release);
       return;
     }
 
     if (!host_.ensure_ready(frames)) {
       init_error_ = "Convolver initialization failed";
-      init_state_.store(InitState::Uninitialized, std::memory_order_release);
+      init_state_.store(InitState::Failed, std::memory_order_release);
       return;
     }
 
@@ -1244,6 +1247,13 @@ auto PipeWireRouter::runtime_snapshot() const -> RuntimeSnapshot {
     } else if (plugin == "limiter" && limiter_filter_ && limiter_filter_->is_ready()) {
       snapshot.active_plugins.push_back(plugin);
     }
+  }
+  if (eq_filter_ && !eq_filter_->is_ready() && !eq_filter_->init_error().empty()) {
+    snapshot.init_error = eq_filter_->init_error();
+  } else if (limiter_filter_ && !limiter_filter_->is_ready() && !limiter_filter_->init_error().empty()) {
+    snapshot.init_error = limiter_filter_->init_error();
+  } else if (convolver_filter_ && !convolver_filter_->is_ready() && !convolver_filter_->init_error().empty()) {
+    snapshot.init_error = convolver_filter_->init_error();
   }
   snapshot.bypass = eq_filter_ ? eq_filter_->is_bypass() : false;
   snapshot.volume = volume_.load(std::memory_order_relaxed);

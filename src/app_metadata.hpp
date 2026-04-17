@@ -3,6 +3,6 @@
 namespace ee {
 
 constexpr auto kApplicationName = "ee-eq-cli";
-constexpr auto kApplicationVersion = "0.3.1.5";
+constexpr auto kApplicationVersion = "0.3.1.6";
 
 }  // namespace ee

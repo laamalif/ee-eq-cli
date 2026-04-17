@@ -99,6 +99,7 @@ class RealSessionBackend final : public SessionBackend {
     snapshot.sink_name = runtime.sink_name;
     snapshot.sink_serial = runtime.sink_serial;
     snapshot.active_plugins = runtime.active_plugins;
+    snapshot.init_error = runtime.init_error;
     snapshot.bypass = runtime.bypass;
     snapshot.volume = runtime.volume;
     return snapshot;

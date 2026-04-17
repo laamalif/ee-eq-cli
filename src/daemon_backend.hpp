@@ -15,6 +15,7 @@ struct RuntimeSnapshot {
   std::string sink_name;
   uint64_t sink_serial = 0;
   std::vector<std::string> active_plugins;
+  std::string init_error;
   bool bypass = false;
   float volume = 1.0F;
 };

@@ -103,6 +103,10 @@ auto DaemonController::status_locked() const -> DaemonStatus {
       status.session_state = SessionLifecycleState::Degraded;
       status.health = HealthState::Degraded;
     }
+    if (!snapshot.init_error.empty()) {
+      status.health = HealthState::Degraded;
+      status.last_error = snapshot.init_error;
+    }
   }
   return status;
 }
@@ -335,6 +339,10 @@ void DaemonController::set_runtime_state_from_backend_locked() {
   status_.effective.bypass = snapshot.bypass;
   status_.effective.volume = snapshot.volume;
   status_.session_state = snapshot.session_active ? SessionLifecycleState::Enabled : SessionLifecycleState::Disabled;
+  if (!snapshot.init_error.empty()) {
+    status_.health = HealthState::Degraded;
+    status_.last_error = snapshot.init_error;
+  }
 }
 
 auto DaemonController::volume_locked(const DaemonRequest& request) -> DaemonResponse {

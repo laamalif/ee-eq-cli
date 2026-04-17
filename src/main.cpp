@@ -2,6 +2,7 @@
 #include <array>
 #include <chrono>
 #include <cstdlib>
+#include <filesystem>
 #include <csignal>
 #include <format>
 #include <cerrno>
@@ -210,7 +211,7 @@ auto handle_daemon_mode(const std::vector<std::string>& arguments) -> std::optio
           ee::log::error("missing value for --preset");
           return EXIT_FAILURE;
         }
-        initial_preset = arguments[++i];
+        initial_preset = std::filesystem::absolute(arguments[++i]).string();
       } else if (arguments[i] == "--sink" || arguments[i] == "-s") {
         if (i + 1 >= arguments.size()) {
           ee::log::error("missing value for --sink");
@@ -298,7 +299,7 @@ auto handle_daemon_mode(const std::vector<std::string>& arguments) -> std::optio
       return EXIT_FAILURE;
     }
 
-    ee::DaemonRequest request{.command = "apply", .preset_path = arguments[2]};
+    ee::DaemonRequest request{.command = "apply", .preset_path = std::filesystem::absolute(arguments[2]).string()};
     for (size_t i = 3; i < arguments.size(); ++i) {
       if (arguments[i] == "--sink" || arguments[i] == "-s") {
         if (i + 1 >= arguments.size()) {
