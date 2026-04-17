@@ -40,6 +40,7 @@ class PipeWireRouter {
     uint64_t sink_serial = 0;
     std::vector<std::string> active_plugins;
     bool bypass = false;
+    float volume = 1.0F;
   };
 
   struct NodeData;
@@ -63,6 +64,7 @@ class PipeWireRouter {
   auto list_sinks(std::string& error) -> std::vector<std::string>;
   auto runtime_snapshot() const -> RuntimeSnapshot;
   void set_bypass(bool bypass);
+  void set_volume(float volume);
   auto wake_fd() const -> int;
   auto next_task_timeout() const -> std::optional<std::chrono::milliseconds>;
   void run_due_tasks();
@@ -111,6 +113,7 @@ class PipeWireRouter {
 
   ParsedPreset preset_;
   std::string sink_selector_;
+  std::atomic<float> volume_{1.0F};
   std::atomic<bool> shutting_down_{false};
   std::atomic<bool> startup_sink_locked_{false};
 

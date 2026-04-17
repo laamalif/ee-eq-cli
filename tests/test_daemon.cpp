@@ -90,6 +90,7 @@ struct FakeBackendState {
   std::vector<std::string> active_plugins = {"equalizer"};
   std::vector<std::string> sinks = {"fake_sink [serial 7]"};
   bool bypass = false;
+  float volume = 1.0F;
 };
 
 class FakeBackend final : public ee::SessionBackend {
@@ -126,6 +127,11 @@ class FakeBackend final : public ee::SessionBackend {
     state_->bypass = bypass;
   }
 
+  void set_volume(float volume) override {
+    std::scoped_lock lock(state_->mutex);
+    state_->volume = volume;
+  }
+
   auto list_sinks(std::string& error) -> std::vector<std::string> override {
     std::scoped_lock lock(state_->mutex);
     error.clear();
@@ -141,6 +147,7 @@ class FakeBackend final : public ee::SessionBackend {
     snapshot.sink_serial = state_->session_active ? state_->sink_serial : 0;
     snapshot.active_plugins = state_->session_active ? state_->active_plugins : std::vector<std::string>{};
     snapshot.bypass = state_->bypass;
+    snapshot.volume = state_->volume;
     return snapshot;
   }
 
@@ -882,6 +889,77 @@ void test_doctor_fields_populated() {
          "pid should be set");
 }
 
+void test_volume_command() {
+  ee::log::info("daemon-test: volume_command");
+  auto harness = start_daemon_harness();
+  ee::DaemonResponse response;
+  std::string error;
+
+  // Volume before apply should fail
+  expect(ee::send_daemon_request(
+             ee::DaemonRequest{.command = "volume", .sink_selector = "0.5"},
+             response, error),
+         "volume send should succeed");
+  expect(!response.ok, "volume before apply should fail");
+  expect(response.error.find("no active session") != std::string::npos,
+         "volume error should mention no active session");
+
+  // Apply preset
+  expect(ee::send_daemon_request(
+             ee::DaemonRequest{.command = "apply", .preset_path = fixture_path("Boosted.json")},
+             response, error),
+         "apply should succeed");
+  expect(response.ok, "apply response should be ok");
+
+  // Set volume to 0.5
+  expect(ee::send_daemon_request(
+             ee::DaemonRequest{.command = "volume", .sink_selector = "0.5"},
+             response, error),
+         "volume 0.5 send should succeed");
+  expect(response.ok, "volume 0.5 should succeed");
+  expect(response.status.desired.volume == 0.5F,
+         "desired volume should be 0.5");
+
+  // Out of range
+  expect(ee::send_daemon_request(
+             ee::DaemonRequest{.command = "volume", .sink_selector = "2.0"},
+             response, error),
+         "volume 2.0 send should succeed");
+  expect(!response.ok, "volume 2.0 should fail");
+  expect(response.error.find("out of range") != std::string::npos,
+         "volume error should mention out of range");
+
+  // Invalid parse
+  expect(ee::send_daemon_request(
+             ee::DaemonRequest{.command = "volume", .sink_selector = "abc"},
+             response, error),
+         "volume abc send should succeed");
+  expect(!response.ok, "volume abc should fail");
+  expect(response.error.find("requires a number") != std::string::npos,
+         "volume error should mention requires a number");
+
+  // Volume persists through disable/enable
+  expect(ee::send_daemon_request(
+             ee::DaemonRequest{.command = "volume", .sink_selector = "0.7"},
+             response, error),
+         "volume 0.7 send should succeed");
+  expect(response.ok, "volume 0.7 should succeed");
+
+  expect(ee::send_daemon_request(
+             ee::DaemonRequest{.command = "disable"},
+             response, error),
+         "disable should succeed");
+  expect(response.ok, "disable should be ok");
+
+  expect(ee::send_daemon_request(
+             ee::DaemonRequest{.command = "enable"},
+             response, error),
+         "enable should succeed");
+  expect(response.ok, "enable should be ok");
+  expect(response.status.desired.volume == 0.7F,
+         "volume should persist after disable/enable");
+}
+
 }  // namespace
 
 int main() {
@@ -904,6 +982,7 @@ int main() {
   test_apply_rollback_failure();
   test_enable_no_desired_config();
   test_doctor_fields_populated();
+  test_volume_command();
 
   if (g_failures != 0) {
     ee::log::error(std::format("{} daemon test assertion(s) failed", g_failures));

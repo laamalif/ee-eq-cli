@@ -50,6 +50,7 @@ ee-eq-cli apply /path/to/preset.json [--sink ..]  # load/replace session
 ee-eq-cli enable                                  # restart from remembered config
 ee-eq-cli disable                                 # stop session, keep daemon alive
 ee-eq-cli bypass on|off                           # glitch-free DSP on/off
+ee-eq-cli volume <0.0-1.5>                        # set output volume (linear)
 ee-eq-cli list-sinks                              # available PipeWire sinks
 ee-eq-cli shutdown                                # stop daemon
 ```
@@ -92,6 +93,12 @@ cmake -B build -S . -G Ninja
 cmake --build build
 ctest --test-dir build --output-on-failure
 ```
+
+## Known Limitations
+
+Physical sink volume (wpctl, GNOME/KDE slider, Bluetooth hardware buttons) has no
+audible effect when the filter chain is active. This is a known limitation of direct
+PipeWire port-to-port linking (same as EasyEffects). Use `ee-eq-cli volume` instead.
 
 ## Environment
 

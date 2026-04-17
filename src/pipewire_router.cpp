@@ -222,6 +222,7 @@ class PipeWireRouter::EqFilterNode {
 
   void set_bypass(bool value) { bypass_.store(value, std::memory_order_relaxed); }
   auto is_bypass() const -> bool { return bypass_.load(std::memory_order_relaxed); }
+  void set_volume_source(std::atomic<float>* vol) { volume_source_ = vol; }
 
  private:
   static void on_filter_state_changed(void* userdata,
@@ -265,33 +266,38 @@ class PipeWireRouter::EqFilterNode {
     if (self->bypass_.load(std::memory_order_relaxed) || self->preset_.bypass) {
       std::ranges::copy(left_in, left_out.begin());
       std::ranges::copy(right_in, right_out.begin());
-      return;
-    }
+    } else {
+      std::ranges::copy(left_in, self->scratch_left_.begin());
+      std::ranges::copy(right_in, self->scratch_right_.begin());
 
-    std::ranges::copy(left_in, self->scratch_left_.begin());
-    std::ranges::copy(right_in, self->scratch_right_.begin());
+      const auto out_gain = self->output_gain_.load(std::memory_order_relaxed);
+      const auto in_gain = self->input_gain_.load(std::memory_order_relaxed);
 
-    const auto out_gain = self->output_gain_.load(std::memory_order_relaxed);
-    const auto in_gain = self->input_gain_.load(std::memory_order_relaxed);
+      if (!self->ready_) {
+        std::ranges::copy(self->scratch_left_, left_out.begin());
+        std::ranges::copy(self->scratch_right_, right_out.begin());
+        if (out_gain != 1.0F) {
+          self->apply_gain(left_out, right_out, out_gain);
+        }
+      } else {
+        if (in_gain != 1.0F) {
+          self->apply_gain(self->scratch_left_, self->scratch_right_, in_gain);
+        }
 
-    if (!self->ready_) {
-      std::ranges::copy(self->scratch_left_, left_out.begin());
-      std::ranges::copy(self->scratch_right_, right_out.begin());
-      if (out_gain != 1.0F) {
-        self->apply_gain(left_out, right_out, out_gain);
+        self->host_.connect_audio_ports(self->scratch_left_, self->scratch_right_, left_out, right_out);
+        self->host_.run();
+
+        if (out_gain != 1.0F) {
+          self->apply_gain(left_out, right_out, out_gain);
+        }
       }
-      return;
     }
 
-    if (in_gain != 1.0F) {
-      self->apply_gain(self->scratch_left_, self->scratch_right_, in_gain);
-    }
-
-    self->host_.connect_audio_ports(self->scratch_left_, self->scratch_right_, left_out, right_out);
-    self->host_.run();
-
-    if (out_gain != 1.0F) {
-      self->apply_gain(left_out, right_out, out_gain);
+    if (self->volume_source_ != nullptr) {
+      const auto vol = self->volume_source_->load(std::memory_order_relaxed);
+      if (vol != 1.0F) {
+        self->apply_gain(left_out, right_out, vol);
+      }
     }
   }
 
@@ -334,6 +340,7 @@ class PipeWireRouter::EqFilterNode {
   std::atomic<float> input_gain_{static_cast<float>(ee::math::db_to_linear(preset_.input_gain_db))};
   std::atomic<float> output_gain_{static_cast<float>(ee::math::db_to_linear(preset_.output_gain_db))};
   std::atomic<bool> bypass_{false};
+  std::atomic<float>* volume_source_ = nullptr;
   std::vector<float> scratch_left_;
   std::vector<float> scratch_right_;
   std::vector<float> dummy_left_;
@@ -462,6 +469,7 @@ class PipeWireRouter::LimiterFilterNode {
   }
 
   void set_bypass(bool value) { bypass_.store(value, std::memory_order_relaxed); }
+  void set_volume_source(std::atomic<float>* vol) { volume_source_ = vol; }
 
  private:
   static void on_filter_state_changed(void* userdata,
@@ -511,33 +519,38 @@ class PipeWireRouter::LimiterFilterNode {
     if (self->bypass_.load(std::memory_order_relaxed) || self->preset_.bypass) {
       std::ranges::copy(left_in, left_out.begin());
       std::ranges::copy(right_in, right_out.begin());
-      return;
-    }
+    } else {
+      std::ranges::copy(left_in, self->scratch_left_.begin());
+      std::ranges::copy(right_in, self->scratch_right_.begin());
 
-    std::ranges::copy(left_in, self->scratch_left_.begin());
-    std::ranges::copy(right_in, self->scratch_right_.begin());
+      const auto out_gain = self->output_gain_.load(std::memory_order_relaxed);
+      const auto in_gain = self->input_gain_.load(std::memory_order_relaxed);
 
-    const auto out_gain = self->output_gain_.load(std::memory_order_relaxed);
-    const auto in_gain = self->input_gain_.load(std::memory_order_relaxed);
+      if (!self->ready_) {
+        std::ranges::copy(self->scratch_left_, left_out.begin());
+        std::ranges::copy(self->scratch_right_, right_out.begin());
+        if (out_gain != 1.0F) {
+          self->apply_gain(left_out, right_out, out_gain);
+        }
+      } else {
+        if (in_gain != 1.0F) {
+          self->apply_gain(self->scratch_left_, self->scratch_right_, in_gain);
+        }
 
-    if (!self->ready_) {
-      std::ranges::copy(self->scratch_left_, left_out.begin());
-      std::ranges::copy(self->scratch_right_, right_out.begin());
-      if (out_gain != 1.0F) {
-        self->apply_gain(left_out, right_out, out_gain);
+        self->host_.connect_audio_ports(self->scratch_left_, self->scratch_right_, left_out, right_out, side_left, side_right);
+        self->host_.run();
+
+        if (out_gain != 1.0F) {
+          self->apply_gain(left_out, right_out, out_gain);
+        }
       }
-      return;
     }
 
-    if (in_gain != 1.0F) {
-      self->apply_gain(self->scratch_left_, self->scratch_right_, in_gain);
-    }
-
-    self->host_.connect_audio_ports(self->scratch_left_, self->scratch_right_, left_out, right_out, side_left, side_right);
-    self->host_.run();
-
-    if (out_gain != 1.0F) {
-      self->apply_gain(left_out, right_out, out_gain);
+    if (self->volume_source_ != nullptr) {
+      const auto vol = self->volume_source_->load(std::memory_order_relaxed);
+      if (vol != 1.0F) {
+        self->apply_gain(left_out, right_out, vol);
+      }
     }
   }
 
@@ -582,6 +595,7 @@ class PipeWireRouter::LimiterFilterNode {
   std::atomic<float> input_gain_{static_cast<float>(ee::math::db_to_linear(preset_.input_gain_db))};
   std::atomic<float> output_gain_{static_cast<float>(ee::math::db_to_linear(preset_.output_gain_db))};
   std::atomic<bool> bypass_{false};
+  std::atomic<float>* volume_source_ = nullptr;
   std::vector<float> scratch_left_;
   std::vector<float> scratch_right_;
   std::vector<float> dummy_left_;
@@ -707,6 +721,7 @@ class PipeWireRouter::ConvolverFilterNode {
   auto node_id() const -> uint32_t { return node_id_; }
 
   void set_bypass(bool value) { bypass_.store(value, std::memory_order_relaxed); }
+  void set_volume_source(std::atomic<float>* vol) { volume_source_ = vol; }
 
  private:
   static void on_filter_state_changed(void* userdata,
@@ -746,62 +761,54 @@ class PipeWireRouter::ConvolverFilterNode {
     if (self->bypass_.load(std::memory_order_relaxed) || self->preset_.bypass) {
       std::ranges::copy(left_in, left_out.begin());
       std::ranges::copy(right_in, right_out.begin());
-      return;
-    }
+    } else {
+      const auto in_gain = self->input_gain_.load(std::memory_order_relaxed);
+      const auto out_gain = self->output_gain_.load(std::memory_order_relaxed);
+      const auto dry = self->dry_.load(std::memory_order_relaxed);
+      const auto wet = self->wet_.load(std::memory_order_relaxed);
 
-    const auto in_gain = self->input_gain_.load(std::memory_order_relaxed);
-    const auto out_gain = self->output_gain_.load(std::memory_order_relaxed);
-    const auto dry = self->dry_.load(std::memory_order_relaxed);
-    const auto wet = self->wet_.load(std::memory_order_relaxed);
+      self->input_left_.resize(n_samples);
+      self->input_right_.resize(n_samples);
+      std::ranges::copy(left_in, self->input_left_.begin());
+      std::ranges::copy(right_in, self->input_right_.begin());
 
-    self->input_left_.resize(n_samples);
-    self->input_right_.resize(n_samples);
-    std::ranges::copy(left_in, self->input_left_.begin());
-    std::ranges::copy(right_in, self->input_right_.begin());
+      if (in_gain != 1.0F) {
+        self->apply_gain(self->input_left_, self->input_right_, in_gain);
+      }
 
-    if (in_gain != 1.0F) {
-      self->apply_gain(self->input_left_, self->input_right_, in_gain);
-    }
+      std::ranges::copy(self->input_left_, left_out.begin());
+      std::ranges::copy(self->input_right_, right_out.begin());
 
-    std::ranges::copy(self->input_left_, left_out.begin());
-    std::ranges::copy(self->input_right_, right_out.begin());
+      bool convolved = false;
+      std::string rate_error;
+      if (self->host_.validate_rate(rate, rate_error)) {
+        if (self->host_.ensure_ready(n_samples)) {
+          self->scratch_left_.assign(left_out.begin(), left_out.end());
+          self->scratch_right_.assign(right_out.begin(), right_out.end());
 
-    std::string rate_error;
-    if (!self->host_.validate_rate(rate, rate_error)) {
-      if (!self->rate_mismatch_warned_) {
+          if (self->host_.process(self->scratch_left_, self->scratch_right_)) {
+            for (size_t i = 0; i < left_out.size(); ++i) {
+              left_out[i] = (wet * self->scratch_left_[i]) + (dry * self->input_left_[i]);
+              right_out[i] = (wet * self->scratch_right_[i]) + (dry * self->input_right_[i]);
+            }
+            convolved = true;
+          }
+        }
+      } else if (!self->rate_mismatch_warned_) {
         log::warn(rate_error);
         self->rate_mismatch_warned_ = true;
       }
+
       if (out_gain != 1.0F) {
         self->apply_gain(left_out, right_out, out_gain);
       }
-      return;
     }
 
-    if (!self->host_.ensure_ready(n_samples)) {
-      if (out_gain != 1.0F) {
-        self->apply_gain(left_out, right_out, out_gain);
+    if (self->volume_source_ != nullptr) {
+      const auto vol = self->volume_source_->load(std::memory_order_relaxed);
+      if (vol != 1.0F) {
+        self->apply_gain(left_out, right_out, vol);
       }
-      return;
-    }
-
-    self->scratch_left_.assign(left_out.begin(), left_out.end());
-    self->scratch_right_.assign(right_out.begin(), right_out.end());
-
-    if (!self->host_.process(self->scratch_left_, self->scratch_right_)) {
-      if (out_gain != 1.0F) {
-        self->apply_gain(left_out, right_out, out_gain);
-      }
-      return;
-    }
-
-    for (size_t i = 0; i < left_out.size(); ++i) {
-      left_out[i] = (wet * self->scratch_left_[i]) + (dry * self->input_left_[i]);
-      right_out[i] = (wet * self->scratch_right_[i]) + (dry * self->input_right_[i]);
-    }
-
-    if (out_gain != 1.0F) {
-      self->apply_gain(left_out, right_out, out_gain);
     }
   }
 
@@ -832,6 +839,7 @@ class PipeWireRouter::ConvolverFilterNode {
   std::atomic<float> dry_{preset_.dry_db <= ee::math::minimum_db_level ? 0.0F : static_cast<float>(ee::math::db_to_linear(preset_.dry_db))};
   std::atomic<float> wet_{preset_.wet_db <= ee::math::minimum_db_level ? 0.0F : static_cast<float>(ee::math::db_to_linear(preset_.wet_db))};
   std::atomic<bool> bypass_{false};
+  std::atomic<float>* volume_source_ = nullptr;
   std::vector<float> scratch_left_;
   std::vector<float> scratch_right_;
   std::vector<float> input_left_;
@@ -1033,6 +1041,21 @@ auto PipeWireRouter::start(std::string& error) -> bool {
     return false;
   }
 
+  for (auto it = preset_.plugin_order.rbegin(); it != preset_.plugin_order.rend(); ++it) {
+    if (*it == "limiter" && limiter_filter_) {
+      limiter_filter_->set_volume_source(&volume_);
+      break;
+    }
+    if (*it == "convolver" && convolver_filter_) {
+      convolver_filter_->set_volume_source(&volume_);
+      break;
+    }
+    if (*it == "equalizer" && eq_filter_) {
+      eq_filter_->set_volume_source(&volume_);
+      break;
+    }
+  }
+
   if (!connect_chain(error)) {
     stop();
     return false;
@@ -1081,6 +1104,7 @@ auto PipeWireRouter::runtime_snapshot() const -> RuntimeSnapshot {
   }
   snapshot.active_plugins = preset_.plugin_order;
   snapshot.bypass = eq_filter_ ? eq_filter_->is_bypass() : false;
+  snapshot.volume = volume_.load(std::memory_order_relaxed);
   return snapshot;
 }
 
@@ -1088,6 +1112,10 @@ void PipeWireRouter::set_bypass(bool bypass) {
   if (eq_filter_) eq_filter_->set_bypass(bypass);
   if (limiter_filter_) limiter_filter_->set_bypass(bypass);
   if (convolver_filter_) convolver_filter_->set_bypass(bypass);
+}
+
+void PipeWireRouter::set_volume(float volume) {
+  volume_.store(volume, std::memory_order_relaxed);
 }
 
 void PipeWireRouter::stop() {

@@ -89,6 +89,10 @@ auto format_doctor_output(const ee::DaemonStatus& status) -> std::string {
 
   output += std::format("\nbypass:   {}", status.desired.bypass ? "on" : "off");
 
+  if (status.effective.session_active) {
+    output += std::format("\nvolume:   {}%", static_cast<int>(status.effective.volume * 100.0F));
+  }
+
   if (!status.effective.active_plugins.empty()) {
     std::string plugins;
     for (size_t i = 0; i < status.effective.active_plugins.size(); ++i) {
@@ -339,6 +343,19 @@ auto handle_daemon_mode(const std::vector<std::string>& arguments) -> std::optio
         response.has_value()) {
       print_status_json(response->status);
       return EXIT_SUCCESS;
+    }
+    return EXIT_FAILURE;
+  }
+
+  if (arguments[1] == "volume") {
+    if (arguments.size() < 3) {
+      ee::log::error("usage: ee-eq-cli volume <0.0-1.5>");
+      return EXIT_FAILURE;
+    }
+    if (const auto response =
+            send_request(ee::DaemonRequest{.command = "volume", .sink_selector = arguments[2]});
+        response.has_value()) {
+      return response->ok ? EXIT_SUCCESS : EXIT_FAILURE;
     }
     return EXIT_FAILURE;
   }

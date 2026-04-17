@@ -28,6 +28,7 @@ class DaemonController {
     std::string sink_selector;
     bool enabled = false;
     bool bypass = false;
+    float volume = 1.0F;
   };
 
   auto status_locked() const -> DaemonStatus;
@@ -36,6 +37,7 @@ class DaemonController {
   auto disable_locked() -> DaemonResponse;
   auto switch_sink_locked(const DaemonRequest& request) -> DaemonResponse;
   auto bypass_locked(const DaemonRequest& request) -> DaemonResponse;
+  auto volume_locked(const DaemonRequest& request) -> DaemonResponse;
   auto list_sinks_locked() -> DaemonResponse;
   auto shutdown_locked() -> DaemonResponse;
   void set_runtime_state_from_backend_locked();

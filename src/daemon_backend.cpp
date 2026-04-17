@@ -76,6 +76,12 @@ class RealSessionBackend final : public SessionBackend {
     }
   }
 
+  void set_volume(float volume) override {
+    if (router_) {
+      router_->set_volume(volume);
+    }
+  }
+
   auto list_sinks(std::string& error) -> std::vector<std::string> override {
     PipeWireRouter router(ParsedPreset{}, {});
     return router.list_sinks(error);
@@ -94,6 +100,7 @@ class RealSessionBackend final : public SessionBackend {
     snapshot.sink_serial = runtime.sink_serial;
     snapshot.active_plugins = runtime.active_plugins;
     snapshot.bypass = runtime.bypass;
+    snapshot.volume = runtime.volume;
     return snapshot;
   }
 

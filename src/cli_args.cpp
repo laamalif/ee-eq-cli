@@ -159,6 +159,7 @@ auto cli_help_text(std::string_view executable_name) -> std::string {
       "      {} enable\n"
       "      {} disable\n"
       "      {} bypass on|off\n"
+      "      {} volume <0.0-1.5>\n"
       "      {} list-sinks\n"
       "      {} shutdown\n\n"
       "Convenience:\n"
@@ -177,6 +178,7 @@ auto cli_help_text(std::string_view executable_name) -> std::string {
       "Environment:\n"
       "      EE_EQ_CLI_DEFAULT_PRESET  Fallback local preset path when --preset is omitted\n"
       "                                (standalone mode and daemon start bootstrap only).\n",
+      executable_name,
       executable_name,
       executable_name,
       executable_name,

@@ -58,6 +58,9 @@ auto DaemonController::handle_request(const DaemonRequest& request) -> DaemonRes
   if (request.command == "bypass") {
     return bypass_locked(request);
   }
+  if (request.command == "volume") {
+    return volume_locked(request);
+  }
   if (request.command == "list-sinks") {
     return list_sinks_locked();
   }
@@ -80,6 +83,7 @@ auto DaemonController::status_locked() const -> DaemonStatus {
     status.desired.sink_selector = desired_->sink_selector;
     status.desired.enabled = desired_->enabled;
     status.desired.bypass = desired_->bypass;
+    status.desired.volume = desired_->volume;
   } else {
     status.desired = {};
   }
@@ -185,6 +189,9 @@ auto DaemonController::enable_locked() -> DaemonResponse {
   if (desired_->bypass) {
     backend_->set_bypass(true);
   }
+  if (desired_->volume != 1.0F) {
+    backend_->set_volume(desired_->volume);
+  }
   set_runtime_state_from_backend_locked();
   status_.health = HealthState::Ok;
   status_.last_error.clear();
@@ -252,6 +259,9 @@ auto DaemonController::switch_sink_locked(const DaemonRequest& request) -> Daemo
   if (desired_->bypass) {
     backend_->set_bypass(true);
   }
+  if (desired_->volume != 1.0F) {
+    backend_->set_volume(desired_->volume);
+  }
   set_runtime_state_from_backend_locked();
   status_.health = HealthState::Ok;
   status_.last_error.clear();
@@ -298,7 +308,29 @@ void DaemonController::set_runtime_state_from_backend_locked() {
   status_.effective.sink_name = snapshot.sink_name;
   status_.effective.sink_serial = snapshot.sink_serial;
   status_.effective.active_plugins = snapshot.active_plugins;
+  status_.effective.volume = snapshot.volume;
   status_.session_state = snapshot.session_active ? SessionLifecycleState::Enabled : SessionLifecycleState::Disabled;
+}
+
+auto DaemonController::volume_locked(const DaemonRequest& request) -> DaemonResponse {
+  if (!desired_.has_value() || !desired_->enabled) {
+    return {.ok = false, .error = "no active session; run 'ee-eq-cli apply <preset>' to start one", .status = status_locked()};
+  }
+
+  float value = 0.0F;
+  try {
+    value = std::stof(request.sink_selector);
+  } catch (...) {
+    return {.ok = false, .error = "volume requires a number; usage: ee-eq-cli volume <0.0-1.5>", .status = status_locked()};
+  }
+
+  if (value < 0.0F || value > 1.5F) {
+    return {.ok = false, .error = "volume out of range; must be 0.0 to 1.5", .status = status_locked()};
+  }
+
+  desired_->volume = value;
+  backend_->set_volume(value);
+  return {.ok = true, .status = status_locked()};
 }
 
 void DaemonController::clear_effective_state_locked() {

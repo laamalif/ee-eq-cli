@@ -108,6 +108,7 @@ auto to_json(nlohmann::json& json, const DaemonStatus& value) -> void {
            {"sink_selector", value.desired.sink_selector},
            {"enabled", value.desired.enabled},
            {"bypass", value.desired.bypass},
+           {"volume", value.desired.volume},
        }},
       {"effective",
        {
@@ -117,6 +118,7 @@ auto to_json(nlohmann::json& json, const DaemonStatus& value) -> void {
            {"sink_serial", value.effective.sink_serial},
            {"active_plugins", value.effective.active_plugins},
            {"bypass", value.effective.bypass},
+           {"volume", value.effective.volume},
        }},
       {"health", to_string(value.health)},
       {"last_error", value.last_error},
@@ -135,12 +137,14 @@ auto from_json(const nlohmann::json& json, DaemonStatus& value) -> void {
   value.desired.sink_selector = desired.value("sink_selector", std::string{});
   value.desired.enabled = desired.value("enabled", false);
   value.desired.bypass = desired.value("bypass", false);
+  value.desired.volume = desired.value("volume", 1.0F);
   value.effective.session_active = effective.value("session_active", false);
   value.effective.preset_origin = effective.value("preset_origin", std::string{});
   value.effective.sink_name = effective.value("sink_name", std::string{});
   value.effective.sink_serial = effective.value("sink_serial", uint64_t{0});
   value.effective.active_plugins = effective.value("active_plugins", std::vector<std::string>{});
   value.effective.bypass = effective.value("bypass", false);
+  value.effective.volume = effective.value("volume", 1.0F);
   value.health = parse_health_state(json.value("health", std::string("failed")));
   value.last_error = json.value("last_error", std::string{});
   value.version = daemon.value("version", std::string{});
