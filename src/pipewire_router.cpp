@@ -124,7 +124,8 @@ class PipeWireRouter::EqFilterNode {
   enum class InitState : uint8_t { Uninitialized, InitPending, Ready };
 
   EqFilterNode(PipeWireRouter* router, pw_core* core, pw_thread_loop* thread_loop, const EqPreset& preset)
-      : router_(router), core_(core), thread_loop_(thread_loop), preset_(preset), host_(kEqPluginUri) {}
+      : router_(router), core_(core), thread_loop_(thread_loop), preset_(preset), host_(kEqPluginUri),
+        dummy_left_(8192, 0.0F), dummy_right_(8192, 0.0F) {}
 
   ~EqFilterNode() {
     disconnect();
@@ -274,6 +275,13 @@ class PipeWireRouter::EqFilterNode {
       return;
     }
 
+    if (rate != self->rate_ || n_samples != self->n_samples_) {
+      self->init_state_.store(InitState::Uninitialized, std::memory_order_relaxed);
+      std::ranges::copy(left_in, left_out.begin());
+      std::ranges::copy(right_in, right_out.begin());
+      return;
+    }
+
     // Ready — process normally
     if (self->bypass_.load(std::memory_order_relaxed) || self->preset_.bypass) {
       std::ranges::copy(left_in, left_out.begin());
@@ -326,7 +334,7 @@ class PipeWireRouter::EqFilterNode {
   void initialize_on_worker(uint32_t rate, uint32_t frames) {
     const uint32_t max_frames = std::max(frames, 8192u);
 
-    if (!host_.create_instance(rate, max_frames)) {
+    if (!host_.create_instance(rate, frames)) {
       init_error_ = "LV2 EQ instantiation failed";
       return;
     }
@@ -390,7 +398,8 @@ class PipeWireRouter::LimiterFilterNode {
   enum class InitState : uint8_t { Uninitialized, InitPending, Ready };
 
   LimiterFilterNode(PipeWireRouter* router, pw_core* core, pw_thread_loop* thread_loop, const LimiterPreset& preset)
-      : router_(router), core_(core), thread_loop_(thread_loop), preset_(preset), host_(kLimiterPluginUri) {}
+      : router_(router), core_(core), thread_loop_(thread_loop), preset_(preset), host_(kLimiterPluginUri),
+        dummy_left_(8192, 0.0F), dummy_right_(8192, 0.0F) {}
 
   ~LimiterFilterNode() {
     disconnect();
@@ -552,6 +561,13 @@ class PipeWireRouter::LimiterFilterNode {
       return;
     }
 
+    if (rate != self->rate_ || n_samples != self->n_samples_) {
+      self->init_state_.store(InitState::Uninitialized, std::memory_order_relaxed);
+      std::ranges::copy(left_in, left_out.begin());
+      std::ranges::copy(right_in, right_out.begin());
+      return;
+    }
+
     // Ready — process normally
     if (self->bypass_.load(std::memory_order_relaxed) || self->preset_.bypass) {
       std::ranges::copy(left_in, left_out.begin());
@@ -597,7 +613,7 @@ class PipeWireRouter::LimiterFilterNode {
   void initialize_on_worker(uint32_t rate, uint32_t frames) {
     const uint32_t max_frames = std::max(frames, 8192u);
 
-    if (!host_.create_instance(rate, max_frames)) {
+    if (!host_.create_instance(rate, frames)) {
       init_error_ = "LV2 limiter instantiation failed";
       return;
     }
@@ -674,7 +690,8 @@ class PipeWireRouter::ConvolverFilterNode {
                       pw_thread_loop* thread_loop,
                       const ConvolverPreset& preset,
                       const ResolvedKernel& kernel)
-      : router_(router), core_(core), thread_loop_(thread_loop), preset_(preset), kernel_(kernel) {}
+      : router_(router), core_(core), thread_loop_(thread_loop), preset_(preset), kernel_(kernel),
+        dummy_left_(8192, 0.0F), dummy_right_(8192, 0.0F) {}
 
   ~ConvolverFilterNode() {
     disconnect();
@@ -824,6 +841,13 @@ class PipeWireRouter::ConvolverFilterNode {
       return;
     }
 
+    if (rate != self->sample_rate_ || n_samples != self->block_size_) {
+      self->init_state_.store(InitState::Uninitialized, std::memory_order_relaxed);
+      std::ranges::copy(left_in, left_out.begin());
+      std::ranges::copy(right_in, right_out.begin());
+      return;
+    }
+
     // Ready — process normally
     if (self->bypass_.load(std::memory_order_relaxed) || self->preset_.bypass) {
       std::ranges::copy(left_in, left_out.begin());
@@ -900,7 +924,7 @@ class PipeWireRouter::ConvolverFilterNode {
       return;
     }
 
-    if (!host_.ensure_ready(max_frames)) {
+    if (!host_.ensure_ready(frames)) {
       init_error_ = "Convolver initialization failed";
       return;
     }

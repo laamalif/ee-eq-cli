@@ -132,6 +132,11 @@ auto DaemonController::apply_locked(const DaemonRequest& request) -> DaemonRespo
       .enabled = true,
   };
 
+  if (desired_.has_value()) {
+    candidate.bypass = desired_->bypass;
+    candidate.volume = desired_->volume;
+  }
+
   const auto previous = desired_;
 
   status_.session_state = SessionLifecycleState::Enabling;
