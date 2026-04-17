@@ -172,6 +172,12 @@ auto DaemonController::apply_locked(const DaemonRequest& request) -> DaemonRespo
   }
 
   desired_ = std::move(candidate);
+  if (desired_->bypass) {
+    backend_->set_bypass(true);
+  }
+  if (desired_->volume != 1.0F) {
+    backend_->set_volume(desired_->volume);
+  }
   set_runtime_state_from_backend_locked();
   status_.health = HealthState::Ok;
   status_.last_error.clear();
