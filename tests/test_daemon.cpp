@@ -82,6 +82,7 @@ struct FakeBackendState {
   std::mutex mutex;
   bool session_active = false;
   bool fail_next_start = false;
+  int fail_start_count = 0;
   std::string fail_message = "forced runtime failure";
   std::string preset_origin;
   std::string sink_name = "fake_sink";
@@ -100,6 +101,11 @@ class FakeBackend final : public ee::SessionBackend {
                      [[maybe_unused]] std::string sink_selector,
                      std::string& error) -> bool override {
     std::scoped_lock lock(state_->mutex);
+    if (state_->fail_start_count > 0) {
+      --state_->fail_start_count;
+      error = state_->fail_message;
+      return false;
+    }
     if (state_->fail_next_start) {
       state_->fail_next_start = false;
       error = state_->fail_message;
@@ -771,6 +777,82 @@ void test_full_lifecycle() {
   expect(response.status.effective.sink_serial == 55, "lifecycle: current sink serial should be 55");
 }
 
+void test_invalid_preset_no_replace() {
+  ee::log::info("daemon-test: invalid_preset_no_replace");
+  auto harness = start_daemon_harness();
+  ee::DaemonResponse response;
+  std::string error;
+
+  expect(ee::send_daemon_request(
+             ee::DaemonRequest{.command = "apply", .preset_path = fixture_path("Boosted.json")},
+             response, error),
+         "initial apply should succeed");
+  expect(response.ok, "initial apply response should be ok");
+  expect(response.status.session_state == ee::SessionLifecycleState::Enabled, "initial session should be enabled");
+
+  expect(ee::send_daemon_request(
+             ee::DaemonRequest{.command = "apply", .preset_path = "/nonexistent/bad.json"},
+             response, error),
+         "invalid apply should return a response");
+  expect(!response.ok, "invalid apply should fail");
+  expect(response.status.session_state == ee::SessionLifecycleState::Enabled, "invalid apply should preserve active session");
+  expect(response.status.effective.preset_origin.ends_with("Boosted.json"),
+         "invalid apply should preserve previous effective preset");
+}
+
+void test_apply_rollback_failure() {
+  ee::log::info("daemon-test: apply_rollback_failure");
+  auto harness = start_daemon_harness();
+  ee::DaemonResponse response;
+  std::string error;
+
+  expect(ee::send_daemon_request(
+             ee::DaemonRequest{.command = "apply", .preset_path = fixture_path("Boosted.json")},
+             response, error),
+         "initial apply should succeed");
+  expect(response.ok, "initial apply response should be ok");
+
+  {
+    std::scoped_lock lock(harness->state->mutex);
+    harness->state->fail_start_count = 2;
+    harness->state->fail_message = "both starts fail";
+  }
+
+  expect(ee::send_daemon_request(
+             ee::DaemonRequest{
+                 .command = "apply",
+                 .preset_path = fixture_path("Bass Enhancing + Perfect EQ - Low Latency.json"),
+             },
+             response, error),
+         "double-fail apply should return a response");
+  expect(!response.ok, "double-fail apply should fail");
+  expect(response.status.session_state == ee::SessionLifecycleState::Degraded,
+         "rollback failure should leave session degraded");
+  expect(response.status.health == ee::HealthState::Degraded,
+         "rollback failure should leave health degraded");
+  expect(!response.status.last_error.empty(),
+         "rollback failure should set last_error");
+  expect(!response.status.effective.session_active,
+         "rollback failure should have no active session");
+}
+
+void test_enable_no_desired_config() {
+  ee::log::info("daemon-test: enable_no_desired_config");
+  auto harness = start_daemon_harness();
+  ee::DaemonResponse response;
+  std::string error;
+
+  expect(ee::send_daemon_request(ee::DaemonRequest{.command = "enable"}, response, error),
+         "enable without config should return a response");
+  expect(!response.ok, "enable without config should fail");
+  expect(response.error.find("no desired config") != std::string::npos,
+         "enable error should mention no desired config");
+  expect(response.status.daemon_state == ee::DaemonProcessState::Ready,
+         "daemon should remain ready after failed enable");
+  expect(response.status.session_state == ee::SessionLifecycleState::Disabled,
+         "session should remain disabled after failed enable");
+}
+
 }  // namespace
 
 int main() {
@@ -789,6 +871,9 @@ int main() {
   test_daemon_single_instance_refusal();
   test_stale_socket_recovery();
   test_full_lifecycle();
+  test_invalid_preset_no_replace();
+  test_apply_rollback_failure();
+  test_enable_no_desired_config();
 
   if (g_failures != 0) {
     ee::log::error(std::format("{} daemon test assertion(s) failed", g_failures));

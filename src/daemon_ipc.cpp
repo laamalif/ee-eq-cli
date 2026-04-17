@@ -167,6 +167,15 @@ auto run_daemon_ipc_server(DaemonController& controller, std::string& error, con
     return EXIT_FAILURE;
   }
 
+  {
+    const auto status = controller.handle_request(DaemonRequest{.command = "status"});
+    ee::log::info("daemon ready");
+    ee::log::info(std::format("socket: {}", socket_path));
+    ee::log::info(std::format("session: {}",
+        status.status.session_state == SessionLifecycleState::Enabled ? "enabled" : "disabled"));
+    ee::log::info(std::format("pid: {}", status.status.pid));
+  }
+
   int signal_fd = -1;
   if (watch_signals) {
     sigset_t signals;

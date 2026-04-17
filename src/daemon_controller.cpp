@@ -271,6 +271,8 @@ auto DaemonController::bypass_locked(const DaemonRequest& request) -> DaemonResp
   }
   desired_->bypass = is_on;
   backend_->set_bypass(is_on);
+  status_.health = HealthState::Ok;
+  status_.last_error.clear();
   return {.ok = true, .status = status_locked()};
 }
 

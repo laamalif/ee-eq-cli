@@ -149,13 +149,21 @@ auto cli_help_text(std::string_view executable_name) -> std::string {
   return std::format(
       "Usage: {} [options]\n"
       "Load an EasyEffects EQ preset into a minimal headless PipeWire/LV2 runtime.\n\n"
-      "Daemon mode:\n"
+      "Daemon:\n"
       "      {} daemon start [--preset <path>] [--sink <name>]\n"
-      "      {} status|health|current-sink|apply <preset>|enable|disable|list-sinks|shutdown\n"
-      "      {} switch-sink <name-or-serial>\n"
-      "      {} bypass on|off\n\n"
-      "Options:\n"
-      "  -p, --preset <preset>  Local EasyEffects EQ preset path.\n"
+      "      {} status\n"
+      "      {} health\n"
+      "      {} current-sink\n"
+      "      {} apply <preset> [--sink <name>]\n"
+      "      {} enable\n"
+      "      {} disable\n"
+      "      {} bypass on|off\n"
+      "      {} list-sinks\n"
+      "      {} shutdown\n\n"
+      "Convenience:\n"
+      "      {} switch-sink <name-or-serial>\n\n"
+      "Offline:\n"
+      "  -p, --preset <preset>  Local EasyEffects EQ preset path (one-shot mode).\n"
       "      --convert-autoeq <text>\n"
       "                        Convert a local AutoEQ-style parametric EQ text file into EasyEffects JSON.\n"
       "  -o, --output <path>    Write converted JSON to a file instead of stdout.\n"
@@ -165,9 +173,16 @@ auto cli_help_text(std::string_view executable_name) -> std::string {
       "  -h, --help             Display this help and exit.\n"
       "  -v, --version          Display version information and exit.\n"
       "\n"
-      "Advanced environment:\n"
+      "Environment:\n"
       "      EE_EQ_CLI_DEFAULT_PRESET  Fallback local preset path when --preset is omitted\n"
-      "                                (standalone mode and daemon start).\n",
+      "                                (standalone mode and daemon start bootstrap only).\n",
+      executable_name,
+      executable_name,
+      executable_name,
+      executable_name,
+      executable_name,
+      executable_name,
+      executable_name,
       executable_name,
       executable_name,
       executable_name,
