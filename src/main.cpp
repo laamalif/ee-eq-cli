@@ -265,7 +265,7 @@ auto handle_daemon_mode(const std::vector<std::string>& arguments) -> std::optio
               ? "ok"
               : response->status.health == ee::HealthState::Degraded ? "degraded" : "failed";
       ee::log::info(health);
-      return EXIT_SUCCESS;
+      return response->status.health == ee::HealthState::Ok ? EXIT_SUCCESS : EXIT_FAILURE;
     }
     return EXIT_FAILURE;
   }

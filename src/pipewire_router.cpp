@@ -1685,6 +1685,21 @@ void PipeWireRouter::reconnect_to_sink(const std::string& new_sink_name) {
   log::info(std::format("reconnecting chain to sink: {} (id {}, serial {})",
                         new_sink->name, new_sink->id, new_sink->serial));
 
+  // Validate new sink has ports BEFORE tearing down old chain
+  std::string error;
+  if (!wait_for_node_ports(new_sink->id, 2, error)) {
+    log::error(std::format("failed to get ports for new sink {}: {}", new_sink_name, error));
+    return;
+  }
+
+  // Save old sink for rollback
+  NodeInfo old_sink;
+  {
+    std::scoped_lock lock(state_mutex_);
+    old_sink = selected_sink_;
+  }
+
+  // New sink is ready — safe to tear down old chain
   clear_patched_streams();
   destroy_links();
 
@@ -1693,20 +1708,34 @@ void PipeWireRouter::reconnect_to_sink(const std::string& new_sink_name) {
     selected_sink_ = *new_sink;
   }
 
-  std::string error;
-  if (!wait_for_node_ports(new_sink->id, 2, error)) {
-    log::error(std::format("failed to get ports for new sink {}: {}", new_sink_name, error));
-    return;
-  }
-
   if (!connect_chain(error)) {
     log::error(std::format("failed to reconnect chain to {}: {}", new_sink_name, error));
+    // Rollback to old sink
+    std::scoped_lock lock(state_mutex_);
+    selected_sink_ = old_sink;
+    std::string rollback_error;
+    if (connect_chain(rollback_error) && wait_for_links_ready(rollback_error)) {
+      log::warn(std::format("rolled back to previous sink: {}", old_sink.name));
+      patch_existing_streams();
+    } else {
+      log::error(std::format("rollback failed: {}; session degraded", rollback_error));
+    }
     return;
   }
 
   if (!wait_for_links_ready(error)) {
     log::error(std::format("chain links failed to negotiate for {}: {}", new_sink_name, error));
     destroy_links();
+    // Rollback to old sink
+    std::scoped_lock lock(state_mutex_);
+    selected_sink_ = old_sink;
+    std::string rollback_error;
+    if (connect_chain(rollback_error) && wait_for_links_ready(rollback_error)) {
+      log::warn(std::format("rolled back to previous sink: {}", old_sink.name));
+      patch_existing_streams();
+    } else {
+      log::error(std::format("rollback failed: {}; session degraded", rollback_error));
+    }
     return;
   }
 

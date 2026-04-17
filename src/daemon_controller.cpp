@@ -96,6 +96,7 @@ auto DaemonController::status_locked() const -> DaemonStatus {
     status.effective.sink_serial = snapshot.sink_serial;
     status.effective.active_plugins = snapshot.active_plugins;
     status.effective.bypass = snapshot.bypass;
+    status.effective.volume = snapshot.volume;
     if (snapshot.session_active) {
       status.session_state = SessionLifecycleState::Enabled;
     } else {
@@ -144,6 +145,12 @@ auto DaemonController::apply_locked(const DaemonRequest& request) -> DaemonRespo
       std::string rollback_error;
       if (backend_->start_session(previous->preset, previous->preset_origin, previous->sink_selector, rollback_error)) {
         desired_ = previous;
+        if (desired_->bypass) {
+          backend_->set_bypass(true);
+        }
+        if (desired_->volume != 1.0F) {
+          backend_->set_volume(desired_->volume);
+        }
         set_runtime_state_from_backend_locked();
         status_.health = HealthState::Degraded;
         status_.last_error = error;
@@ -244,6 +251,12 @@ auto DaemonController::switch_sink_locked(const DaemonRequest& request) -> Daemo
     desired_->sink_selector = previous_sink;
     std::string rollback_error;
     if (backend_->start_session(desired_->preset, desired_->preset_origin, previous_sink, rollback_error)) {
+      if (desired_->bypass) {
+        backend_->set_bypass(true);
+      }
+      if (desired_->volume != 1.0F) {
+        backend_->set_volume(desired_->volume);
+      }
       set_runtime_state_from_backend_locked();
       status_.health = HealthState::Degraded;
       status_.last_error = error;
@@ -308,6 +321,7 @@ void DaemonController::set_runtime_state_from_backend_locked() {
   status_.effective.sink_name = snapshot.sink_name;
   status_.effective.sink_serial = snapshot.sink_serial;
   status_.effective.active_plugins = snapshot.active_plugins;
+  status_.effective.bypass = snapshot.bypass;
   status_.effective.volume = snapshot.volume;
   status_.session_state = snapshot.session_active ? SessionLifecycleState::Enabled : SessionLifecycleState::Disabled;
 }
@@ -318,8 +332,12 @@ auto DaemonController::volume_locked(const DaemonRequest& request) -> DaemonResp
   }
 
   float value = 0.0F;
+  std::size_t pos = 0;
   try {
-    value = std::stof(request.sink_selector);
+    value = std::stof(request.sink_selector, &pos);
+    if (pos != request.sink_selector.length()) {
+      return {.ok = false, .error = "volume requires a number; usage: ee-eq-cli volume <0.0-1.5>", .status = status_locked()};
+    }
   } catch (...) {
     return {.ok = false, .error = "volume requires a number; usage: ee-eq-cli volume <0.0-1.5>", .status = status_locked()};
   }
