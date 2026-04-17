@@ -61,6 +61,52 @@ void print_status_json(const ee::DaemonStatus& status) {
   ee::log::info(nlohmann::json(status).dump(2));
 }
 
+auto format_doctor_output(const ee::DaemonStatus& status) -> std::string {
+  std::string output = std::format(
+      "ee-eq-cli {} (pid {}, up since {})\n"
+      "daemon:   {}\n"
+      "session:  {}\n"
+      "health:   {}",
+      status.version, status.pid, status.started_at,
+      ee::to_string(status.daemon_state),
+      ee::to_string(status.session_state),
+      ee::to_string(status.health));
+
+  if (status.effective.session_active && !status.effective.preset_origin.empty()) {
+    output += std::format("\npreset:   {}", status.effective.preset_origin);
+  } else if (!status.desired.preset_path.empty()) {
+    output += std::format("\npreset:   {}", status.desired.preset_path);
+  } else {
+    output += "\npreset:   (none)";
+  }
+
+  if (status.effective.session_active && !status.effective.sink_name.empty()) {
+    output += std::format("\nsink:     {} [serial {}]",
+                          status.effective.sink_name, status.effective.sink_serial);
+  } else {
+    output += "\nsink:     (none)";
+  }
+
+  output += std::format("\nbypass:   {}", status.desired.bypass ? "on" : "off");
+
+  if (!status.effective.active_plugins.empty()) {
+    std::string plugins;
+    for (size_t i = 0; i < status.effective.active_plugins.size(); ++i) {
+      if (i != 0) plugins += ", ";
+      plugins += status.effective.active_plugins[i];
+    }
+    output += std::format("\nplugins:  {}", plugins);
+  } else {
+    output += "\nplugins:  (none)";
+  }
+
+  if (!status.last_error.empty()) {
+    output += std::format("\nerror:    {}", status.last_error);
+  }
+
+  return output;
+}
+
 auto wait_for_shutdown_signal(ee::PipeWireRouter& router) -> int {
   sigset_t signals;
   sigemptyset(&signals);
@@ -215,6 +261,14 @@ auto handle_daemon_mode(const std::vector<std::string>& arguments) -> std::optio
               ? "ok"
               : response->status.health == ee::HealthState::Degraded ? "degraded" : "failed";
       ee::log::info(health);
+      return EXIT_SUCCESS;
+    }
+    return EXIT_FAILURE;
+  }
+
+  if (arguments[1] == "doctor") {
+    if (const auto response = send_request(ee::DaemonRequest{.command = "status"}); response.has_value()) {
+      ee::log::info(format_doctor_output(response->status));
       return EXIT_SUCCESS;
     }
     return EXIT_FAILURE;

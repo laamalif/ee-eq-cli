@@ -29,6 +29,10 @@ enum class HealthState {
   Failed,
 };
 
+auto to_string(DaemonProcessState value) -> std::string_view;
+auto to_string(SessionLifecycleState value) -> std::string_view;
+auto to_string(HealthState value) -> std::string_view;
+
 struct DesiredState {
   std::string preset_path;
   std::string sink_selector;

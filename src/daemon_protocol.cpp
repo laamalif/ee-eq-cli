@@ -4,8 +4,6 @@
 
 namespace ee {
 
-namespace {
-
 auto to_string(const DaemonProcessState value) -> std::string_view {
   switch (value) {
     case DaemonProcessState::Starting:
@@ -47,6 +45,8 @@ auto to_string(const HealthState value) -> std::string_view {
   }
   return "failed";
 }
+
+namespace {
 
 auto parse_daemon_state(const std::string& value) -> DaemonProcessState {
   if (value == "ready") {

@@ -152,6 +152,7 @@ auto cli_help_text(std::string_view executable_name) -> std::string {
       "Daemon:\n"
       "      {} daemon start [--preset <path>] [--sink <name>]\n"
       "      {} status\n"
+      "      {} doctor\n"
       "      {} health\n"
       "      {} current-sink\n"
       "      {} apply <preset> [--sink <name>]\n"
@@ -176,6 +177,7 @@ auto cli_help_text(std::string_view executable_name) -> std::string {
       "Environment:\n"
       "      EE_EQ_CLI_DEFAULT_PRESET  Fallback local preset path when --preset is omitted\n"
       "                                (standalone mode and daemon start bootstrap only).\n",
+      executable_name,
       executable_name,
       executable_name,
       executable_name,

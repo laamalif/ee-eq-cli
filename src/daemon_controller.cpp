@@ -104,7 +104,7 @@ auto DaemonController::status_locked() const -> DaemonStatus {
 
 auto DaemonController::apply_locked(const DaemonRequest& request) -> DaemonResponse {
   if (request.preset_path.empty()) {
-    return {.ok = false, .error = "apply requires an explicit preset path", .status = status_locked()};
+    return {.ok = false, .error = "apply requires a preset path; usage: ee-eq-cli apply <preset>", .status = status_locked()};
   }
 
   std::string error;
@@ -164,7 +164,7 @@ auto DaemonController::apply_locked(const DaemonRequest& request) -> DaemonRespo
 
 auto DaemonController::enable_locked() -> DaemonResponse {
   if (!desired_.has_value()) {
-    return {.ok = false, .error = "no desired config loaded; use apply", .status = status_locked()};
+    return {.ok = false, .error = "no preset loaded; run 'ee-eq-cli apply <preset>' first", .status = status_locked()};
   }
   if (desired_->enabled && status_.session_state == SessionLifecycleState::Enabled) {
     return {.ok = true, .status = status_locked()};
@@ -216,10 +216,10 @@ auto DaemonController::list_sinks_locked() -> DaemonResponse {
 
 auto DaemonController::switch_sink_locked(const DaemonRequest& request) -> DaemonResponse {
   if (!desired_.has_value()) {
-    return {.ok = false, .error = "no preset loaded; use apply first", .status = status_locked()};
+    return {.ok = false, .error = "no preset loaded; run 'ee-eq-cli apply <preset>' first", .status = status_locked()};
   }
   if (request.sink_selector.empty()) {
-    return {.ok = false, .error = "switch-sink requires a sink name or serial", .status = status_locked()};
+    return {.ok = false, .error = "switch-sink requires a sink name or serial; usage: ee-eq-cli switch-sink <name-or-serial>", .status = status_locked()};
   }
 
   const auto previous_sink = desired_->sink_selector;
@@ -260,14 +260,14 @@ auto DaemonController::switch_sink_locked(const DaemonRequest& request) -> Daemo
 
 auto DaemonController::bypass_locked(const DaemonRequest& request) -> DaemonResponse {
   if (!desired_.has_value() || !desired_->enabled) {
-    return {.ok = false, .error = "no active session", .status = status_locked()};
+    return {.ok = false, .error = "no active session; run 'ee-eq-cli apply <preset>' to start one", .status = status_locked()};
   }
 
   const auto& value = request.sink_selector;
   const bool is_on = (value == "on" || value == "true" || value == "1");
   const bool is_off = (value == "off" || value == "false" || value == "0");
   if (!is_on && !is_off) {
-    return {.ok = false, .error = "bypass requires on or off", .status = status_locked()};
+    return {.ok = false, .error = "bypass requires on or off; usage: ee-eq-cli bypass on|off", .status = status_locked()};
   }
   desired_->bypass = is_on;
   backend_->set_bypass(is_on);

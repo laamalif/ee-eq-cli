@@ -237,6 +237,14 @@ auto run_daemon_ipc_server(DaemonController& controller, std::string& error, con
         response.ok = false;
         response.error = request_error;
       } else {
+        std::string log_line = std::format("request: {}", request.command);
+        if (!request.preset_path.empty()) {
+          log_line += std::format(" preset={}", request.preset_path);
+        }
+        if (!request.sink_selector.empty()) {
+          log_line += std::format(" sink={}", request.sink_selector);
+        }
+        log::info(log_line);
         response = controller.handle_request(request);
       }
 

@@ -22,10 +22,19 @@ Optional flags:
 
 ### Daemon Mode
 
-Run as a long-lived daemon and control sessions over a Unix socket:
+Start a foreground daemon that listens on a Unix socket:
 
 ```bash
 ee-eq-cli daemon start [--preset /path/to/preset.json] [--sink <name-or-serial>]
+```
+
+The daemon runs in the foreground and prints a ready line on startup:
+
+```
+daemon ready
+socket: /run/user/1000/ee-eq-cli/daemon.sock
+session: disabled
+pid: 12345
 ```
 
 When `--preset` is provided (or `EE_EQ_CLI_DEFAULT_PRESET` is set), the daemon auto-applies the preset on startup.
@@ -33,16 +42,22 @@ When `--preset` is provided (or `EE_EQ_CLI_DEFAULT_PRESET` is set), the daemon a
 Then from another terminal:
 
 ```bash
-ee-eq-cli apply /path/to/preset.json [--sink <name-or-serial>]
-ee-eq-cli switch-sink <name-or-serial>
-ee-eq-cli bypass on|off
-ee-eq-cli status
-ee-eq-cli health
-ee-eq-cli current-sink
-ee-eq-cli enable
-ee-eq-cli disable
-ee-eq-cli list-sinks
-ee-eq-cli shutdown
+ee-eq-cli status                                  # full JSON status
+ee-eq-cli doctor                                  # human-readable summary
+ee-eq-cli health                                  # one-line: ok / degraded / failed
+ee-eq-cli current-sink                            # one-line: sink name and serial
+ee-eq-cli apply /path/to/preset.json [--sink ..]  # load/replace session
+ee-eq-cli enable                                  # restart from remembered config
+ee-eq-cli disable                                 # stop session, keep daemon alive
+ee-eq-cli bypass on|off                           # glitch-free DSP on/off
+ee-eq-cli list-sinks                              # available PipeWire sinks
+ee-eq-cli shutdown                                # stop daemon
+```
+
+Convenience:
+
+```bash
+ee-eq-cli switch-sink <name-or-serial>            # change sink without re-applying preset
 ```
 
 ### AutoEQ Converter
@@ -78,11 +93,13 @@ cmake --build build
 ctest --test-dir build --output-on-failure
 ```
 
-## Advanced
+## Environment
 
 - `EE_EQ_CLI_DEFAULT_PRESET=/path/to/preset.json`
-   Fallback preset when --preset is omitted
-   
+   Fallback preset when `--preset` is omitted (standalone mode and daemon start bootstrap only).
+
+The following are available in standalone mode only (unsupported in daemon mode):
+
 - `EE_EQ_CLI_DISABLE_CONVOLVER=1`
    Disable the convolver
 

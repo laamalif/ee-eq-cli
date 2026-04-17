@@ -845,12 +845,41 @@ void test_enable_no_desired_config() {
   expect(ee::send_daemon_request(ee::DaemonRequest{.command = "enable"}, response, error),
          "enable without config should return a response");
   expect(!response.ok, "enable without config should fail");
-  expect(response.error.find("no desired config") != std::string::npos,
-         "enable error should mention no desired config");
+  expect(response.error.find("no preset loaded") != std::string::npos,
+         "enable error should mention no preset loaded");
   expect(response.status.daemon_state == ee::DaemonProcessState::Ready,
          "daemon should remain ready after failed enable");
   expect(response.status.session_state == ee::SessionLifecycleState::Disabled,
          "session should remain disabled after failed enable");
+}
+
+void test_doctor_fields_populated() {
+  ee::log::info("daemon-test: doctor_fields_populated");
+  auto harness = start_daemon_harness();
+  ee::DaemonResponse response;
+  std::string error;
+
+  expect(ee::send_daemon_request(
+             ee::DaemonRequest{.command = "apply", .preset_path = fixture_path("Boosted.json")},
+             response, error),
+         "apply should succeed");
+  expect(response.ok, "apply response should be ok");
+
+  expect(ee::to_string(response.status.daemon_state) == "ready",
+         "to_string(daemon_state) should return ready");
+  expect(ee::to_string(response.status.session_state) == "enabled",
+         "to_string(session_state) should return enabled");
+  expect(ee::to_string(response.status.health) == "ok",
+         "to_string(health) should return ok");
+
+  expect(!response.status.effective.preset_origin.empty(),
+         "effective preset_origin should be set");
+  expect(!response.status.effective.sink_name.empty(),
+         "effective sink_name should be set");
+  expect(!response.status.version.empty(),
+         "version should be set");
+  expect(response.status.pid != 0,
+         "pid should be set");
 }
 
 }  // namespace
@@ -874,6 +903,7 @@ int main() {
   test_invalid_preset_no_replace();
   test_apply_rollback_failure();
   test_enable_no_desired_config();
+  test_doctor_fields_populated();
 
   if (g_failures != 0) {
     ee::log::error(std::format("{} daemon test assertion(s) failed", g_failures));
