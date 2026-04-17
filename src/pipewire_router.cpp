@@ -667,11 +667,14 @@ class PipeWireRouter::LimiterFilterNode {
 
 class PipeWireRouter::ConvolverFilterNode {
  public:
-  ConvolverFilterNode(pw_core* core,
+  enum class InitState : uint8_t { Uninitialized, InitPending, Ready };
+
+  ConvolverFilterNode(PipeWireRouter* router,
+                      pw_core* core,
                       pw_thread_loop* thread_loop,
                       const ConvolverPreset& preset,
                       const ResolvedKernel& kernel)
-      : core_(core), thread_loop_(thread_loop), preset_(preset), kernel_(kernel) {}
+      : router_(router), core_(core), thread_loop_(thread_loop), preset_(preset), kernel_(kernel) {}
 
   ~ConvolverFilterNode() {
     disconnect();
@@ -797,17 +800,31 @@ class PipeWireRouter::ConvolverFilterNode {
     auto* out_left = static_cast<float*>(pw_filter_get_dsp_buffer(self->left_out_, n_samples));
     auto* out_right = static_cast<float*>(pw_filter_get_dsp_buffer(self->right_out_, n_samples));
 
-    self->dummy_left_.assign(n_samples, 0.0F);
-    self->dummy_right_.assign(n_samples, 0.0F);
+    // Use pre-allocated dummy buffers if pointers are null
+    std::span<float> left_in = in_left != nullptr ? std::span<float>(in_left, n_samples)
+                                                   : std::span<float>(self->dummy_left_).subspan(0, n_samples);
+    std::span<float> right_in = in_right != nullptr ? std::span<float>(in_right, n_samples)
+                                                     : std::span<float>(self->dummy_right_).subspan(0, n_samples);
+    std::span<float> left_out = out_left != nullptr ? std::span<float>(out_left, n_samples)
+                                                     : std::span<float>(self->dummy_left_).subspan(0, n_samples);
+    std::span<float> right_out = out_right != nullptr ? std::span<float>(out_right, n_samples)
+                                                       : std::span<float>(self->dummy_right_).subspan(0, n_samples);
 
-    std::span<float> left_in = in_left != nullptr ? std::span<float>(in_left, n_samples) : std::span<float>(self->dummy_left_);
-    std::span<float> right_in =
-        in_right != nullptr ? std::span<float>(in_right, n_samples) : std::span<float>(self->dummy_right_);
-    std::span<float> left_out =
-        out_left != nullptr ? std::span<float>(out_left, n_samples) : std::span<float>(self->dummy_left_);
-    std::span<float> right_out =
-        out_right != nullptr ? std::span<float>(out_right, n_samples) : std::span<float>(self->dummy_right_);
+    // Check initialization state
+    const auto state = self->init_state_.load(std::memory_order_acquire);
+    if (state != InitState::Ready) {
+      // Output passthrough while initializing
+      std::ranges::copy(left_in, left_out.begin());
+      std::ranges::copy(right_in, right_out.begin());
 
+      if (state == InitState::Uninitialized) {
+        self->init_state_.store(InitState::InitPending, std::memory_order_relaxed);
+        self->schedule_initialization(rate, n_samples);
+      }
+      return;
+    }
+
+    // Ready — process normally
     if (self->bypass_.load(std::memory_order_relaxed) || self->preset_.bypass) {
       std::ranges::copy(left_in, left_out.begin());
       std::ranges::copy(right_in, right_out.begin());
@@ -817,36 +834,32 @@ class PipeWireRouter::ConvolverFilterNode {
       const auto dry = self->dry_.load(std::memory_order_relaxed);
       const auto wet = self->wet_.load(std::memory_order_relaxed);
 
-      self->input_left_.resize(n_samples);
-      self->input_right_.resize(n_samples);
-      std::ranges::copy(left_in, self->input_left_.begin());
-      std::ranges::copy(right_in, self->input_right_.begin());
+      // Use pre-allocated input buffers (no allocation)
+      auto input_left = std::span<float>(self->input_left_).subspan(0, n_samples);
+      auto input_right = std::span<float>(self->input_right_).subspan(0, n_samples);
+
+      std::ranges::copy(left_in, input_left.begin());
+      std::ranges::copy(right_in, input_right.begin());
 
       if (in_gain != 1.0F) {
-        self->apply_gain(self->input_left_, self->input_right_, in_gain);
+        self->apply_gain(input_left, input_right, in_gain);
       }
 
-      std::ranges::copy(self->input_left_, left_out.begin());
-      std::ranges::copy(self->input_right_, right_out.begin());
+      std::ranges::copy(input_left, left_out.begin());
+      std::ranges::copy(input_right, right_out.begin());
 
-      bool convolved = false;
-      std::string rate_error;
-      if (self->host_.validate_rate(rate, rate_error)) {
-        if (self->host_.ensure_ready(n_samples)) {
-          self->scratch_left_.assign(left_out.begin(), left_out.end());
-          self->scratch_right_.assign(right_out.begin(), right_out.end());
+      // Use pre-allocated scratch buffers (no allocation)
+      auto scratch_left = std::span<float>(self->scratch_left_).subspan(0, n_samples);
+      auto scratch_right = std::span<float>(self->scratch_right_).subspan(0, n_samples);
 
-          if (self->host_.process(self->scratch_left_, self->scratch_right_)) {
-            for (size_t i = 0; i < left_out.size(); ++i) {
-              left_out[i] = (wet * self->scratch_left_[i]) + (dry * self->input_left_[i]);
-              right_out[i] = (wet * self->scratch_right_[i]) + (dry * self->input_right_[i]);
-            }
-            convolved = true;
-          }
+      std::ranges::copy(left_out, scratch_left.begin());
+      std::ranges::copy(right_out, scratch_right.begin());
+
+      if (self->host_.process(scratch_left, scratch_right)) {
+        for (size_t i = 0; i < left_out.size(); ++i) {
+          left_out[i] = (wet * scratch_left[i]) + (dry * input_left[i]);
+          right_out[i] = (wet * scratch_right[i]) + (dry * input_right[i]);
         }
-      } else if (!self->rate_mismatch_warned_) {
-        log::warn(rate_error);
-        self->rate_mismatch_warned_ = true;
       }
 
       if (out_gain != 1.0F) {
@@ -870,6 +883,41 @@ class PipeWireRouter::ConvolverFilterNode {
     }
   }
 
+  void schedule_initialization(uint32_t rate, uint32_t frames) {
+    sample_rate_ = rate;
+    block_size_ = frames;
+    router_->schedule_task(std::chrono::milliseconds(0), [this, rate, frames]() {
+      initialize_on_worker(rate, frames);
+    });
+  }
+
+  void initialize_on_worker(uint32_t rate, uint32_t frames) {
+    const uint32_t max_frames = std::max(frames, 8192u);
+
+    std::string rate_error;
+    if (!host_.validate_rate(rate, rate_error)) {
+      init_error_ = rate_error;
+      return;
+    }
+
+    if (!host_.ensure_ready(max_frames)) {
+      init_error_ = "Convolver initialization failed";
+      return;
+    }
+
+    scratch_left_.resize(max_frames);
+    scratch_right_.resize(max_frames);
+    input_left_.resize(max_frames);
+    input_right_.resize(max_frames);
+    dummy_left_.resize(max_frames);
+    dummy_right_.resize(max_frames);
+    allocated_frames_ = max_frames;
+    init_error_.clear();
+
+    init_state_.store(InitState::Ready, std::memory_order_release);
+  }
+
+  PipeWireRouter* router_ = nullptr;
   pw_core* core_ = nullptr;
   pw_thread_loop* thread_loop_ = nullptr;
   ConvolverPreset preset_;
@@ -882,6 +930,11 @@ class PipeWireRouter::ConvolverFilterNode {
   FilterPort* left_out_ = nullptr;
   FilterPort* right_out_ = nullptr;
   uint32_t node_id_ = SPA_ID_INVALID;
+  uint32_t sample_rate_ = 0;
+  uint32_t block_size_ = 0;
+  std::atomic<InitState> init_state_{InitState::Uninitialized};
+  uint32_t allocated_frames_ = 0;
+  std::string init_error_;
   std::atomic<bool> can_get_node_id_{false};
   std::atomic<pw_filter_state> state_{PW_FILTER_STATE_UNCONNECTED};
   std::atomic<float> input_gain_{static_cast<float>(ee::math::db_to_linear(preset_.input_gain_db))};
@@ -1061,7 +1114,7 @@ auto PipeWireRouter::start(std::string& error) -> bool {
   log::info("plugin enabled: equalizer");
 
   if (preset_.convolver.has_value() && resolved_convolver.has_value()) {
-    convolver_filter_ = std::make_unique<ConvolverFilterNode>(core_, thread_loop_, *preset_.convolver, *resolved_convolver);
+    convolver_filter_ = std::make_unique<ConvolverFilterNode>(this, core_, thread_loop_, *preset_.convolver, *resolved_convolver);
     if (!convolver_filter_->connect(error)) {
       log::warn("convolver skipped: " + error);
       error.clear();

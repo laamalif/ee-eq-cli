@@ -164,11 +164,11 @@ void ConvolverHost::apply_ir_width_and_autogain() {
 
 auto ConvolverHost::ensure_ready(uint32_t block_size) -> bool {
   std::scoped_lock lock(mutex_);
-  if (ready_ && block_size_ == block_size) {
+  if (ready_.load(std::memory_order_acquire) && block_size_ == block_size) {
     return true;
   }
 
-  ready_ = false;
+  ready_.store(false, std::memory_order_relaxed);
   if (conv_) {
     conv_->stop_process();
     while (!conv_->check_stop()) {
@@ -208,17 +208,21 @@ auto ConvolverHost::ensure_ready(uint32_t block_size) -> bool {
     }
   }
 
-  ready_ = true;
+  ready_.store(true, std::memory_order_release);
   return true;
 }
 
 auto ConvolverHost::process(std::span<float> left, std::span<float> right) -> bool {
-  std::scoped_lock lock(mutex_);
-  if (!ready_ || !conv_ || conv_->state() != Convproc::ST_PROC) {
+  // Lock-free: acquire ready_ to synchronize with ensure_ready's release
+  if (!ready_.load(std::memory_order_acquire)) {
+    return false;
+  }
+
+  // After ready_ is true, conv_ is stable and won't be destroyed
+  if (!conv_ || conv_->state() != Convproc::ST_PROC) {
     return false;
   }
   if (left.size() != block_size_ || right.size() != block_size_) {
-    ready_ = false;
     return false;
   }
 
@@ -231,7 +235,6 @@ auto ConvolverHost::process(std::span<float> left, std::span<float> right) -> bo
   std::ranges::copy(right, right_in.begin());
 
   if (conv_->process(true) != 0) {
-    ready_ = false;
     return false;
   }
 
@@ -242,7 +245,7 @@ auto ConvolverHost::process(std::span<float> left, std::span<float> right) -> bo
 
 void ConvolverHost::stop() {
   std::scoped_lock lock(mutex_);
-  ready_ = false;
+  ready_.store(false, std::memory_order_relaxed);
   if (conv_) {
     conv_->stop_process();
     while (!conv_->check_stop()) {
