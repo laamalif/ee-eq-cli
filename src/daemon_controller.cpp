@@ -194,7 +194,6 @@ auto DaemonController::enable_locked() -> DaemonResponse {
 auto DaemonController::disable_locked() -> DaemonResponse {
   if (desired_.has_value()) {
     desired_->enabled = false;
-    desired_->bypass = false;
   }
 
   status_.session_state = SessionLifecycleState::Disabling;
@@ -265,9 +264,14 @@ auto DaemonController::bypass_locked(const DaemonRequest& request) -> DaemonResp
     return {.ok = false, .error = "no active session", .status = status_locked()};
   }
 
-  const bool enable_bypass = (request.sink_selector == "on" || request.sink_selector == "true" || request.sink_selector == "1");
-  desired_->bypass = enable_bypass;
-  backend_->set_bypass(enable_bypass);
+  const auto& value = request.sink_selector;
+  const bool is_on = (value == "on" || value == "true" || value == "1");
+  const bool is_off = (value == "off" || value == "false" || value == "0");
+  if (!is_on && !is_off) {
+    return {.ok = false, .error = "bypass requires on or off", .status = status_locked()};
+  }
+  desired_->bypass = is_on;
+  backend_->set_bypass(is_on);
   return {.ok = true, .status = status_locked()};
 }
 

@@ -551,6 +551,58 @@ void test_bypass_no_session() {
   expect(!response.ok, "bypass without active session should fail");
 }
 
+void test_bypass_rejects_invalid_value() {
+  ee::log::info("daemon-test: bypass_rejects_invalid_value");
+  auto harness = start_daemon_harness();
+  ee::DaemonResponse response;
+  std::string error;
+
+  expect(ee::send_daemon_request(
+             ee::DaemonRequest{.command = "apply", .preset_path = fixture_path("Boosted.json")},
+             response,
+             error),
+         "apply should succeed");
+  expect(response.ok, "apply response should be ok");
+
+  expect(ee::send_daemon_request(
+             ee::DaemonRequest{.command = "bypass", .sink_selector = "foo"},
+             response,
+             error),
+         "bypass foo request should return a response");
+  expect(!response.ok, "bypass foo should fail");
+}
+
+void test_bypass_survives_disable_enable() {
+  ee::log::info("daemon-test: bypass_survives_disable_enable");
+  auto harness = start_daemon_harness();
+  ee::DaemonResponse response;
+  std::string error;
+
+  expect(ee::send_daemon_request(
+             ee::DaemonRequest{.command = "apply", .preset_path = fixture_path("Boosted.json")},
+             response,
+             error),
+         "apply should succeed");
+  expect(response.ok, "apply response should be ok");
+
+  expect(ee::send_daemon_request(
+             ee::DaemonRequest{.command = "bypass", .sink_selector = "on"},
+             response,
+             error),
+         "bypass on should succeed");
+  expect(response.ok, "bypass on response should be ok");
+  expect(response.status.desired.bypass, "bypass should be on");
+
+  expect(ee::send_daemon_request(ee::DaemonRequest{.command = "disable"}, response, error),
+         "disable should succeed");
+  expect(response.ok, "disable response should be ok");
+
+  expect(ee::send_daemon_request(ee::DaemonRequest{.command = "enable"}, response, error),
+         "enable should succeed");
+  expect(response.ok, "enable response should be ok");
+  expect(response.status.desired.bypass, "bypass should survive disable/enable cycle");
+}
+
 void test_bypass_survives_switch_sink() {
   ee::log::info("daemon-test: bypass_survives_switch_sink");
   auto harness = start_daemon_harness();
@@ -611,6 +663,8 @@ int main() {
   test_switch_sink_no_preset();
   test_bypass_on_off();
   test_bypass_no_session();
+  test_bypass_rejects_invalid_value();
+  test_bypass_survives_disable_enable();
   test_bypass_survives_switch_sink();
   test_daemon_single_instance_refusal();
   test_stale_socket_recovery();
