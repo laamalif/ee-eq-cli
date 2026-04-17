@@ -226,7 +226,9 @@ class PipeWireRouter::EqFilterNode {
   void set_bypass(bool value) { bypass_.store(value, std::memory_order_relaxed); }
   auto is_bypass() const -> bool { return bypass_.load(std::memory_order_relaxed); }
   auto is_ready() const -> bool { return init_state_.load(std::memory_order_relaxed) == InitState::Ready; }
-  auto init_error() const -> const std::string& { return init_error_; }
+  auto init_error() const -> std::string {
+    return init_state_.load(std::memory_order_acquire) == InitState::Failed ? init_error_ : std::string{};
+  }
   void set_volume_source(std::atomic<float>* vol) { volume_source_ = vol; }
 
  private:
@@ -266,13 +268,14 @@ class PipeWireRouter::EqFilterNode {
     // Check initialization state
     const auto state = self->init_state_.load(std::memory_order_acquire);
     if (state != InitState::Ready) {
-      // Output passthrough while initializing
       std::ranges::copy(left_in, left_out.begin());
       std::ranges::copy(right_in, right_out.begin());
 
       if (state == InitState::Uninitialized) {
         self->init_state_.store(InitState::InitPending, std::memory_order_relaxed);
         self->schedule_initialization(rate, n_samples);
+      } else if (state == InitState::Failed && (rate != self->rate_ || n_samples != self->n_samples_)) {
+        self->init_state_.store(InitState::Uninitialized, std::memory_order_relaxed);
       }
       return;
     }
@@ -289,7 +292,6 @@ class PipeWireRouter::EqFilterNode {
       std::ranges::copy(left_in, left_out.begin());
       std::ranges::copy(right_in, right_out.begin());
     } else {
-      // Use pre-allocated scratch buffers (no allocation)
       auto scratch_left = std::span<float>(self->scratch_left_).subspan(0, n_samples);
       auto scratch_right = std::span<float>(self->scratch_right_).subspan(0, n_samples);
 
@@ -509,7 +511,9 @@ class PipeWireRouter::LimiterFilterNode {
 
   void set_bypass(bool value) { bypass_.store(value, std::memory_order_relaxed); }
   auto is_ready() const -> bool { return init_state_.load(std::memory_order_relaxed) == InitState::Ready; }
-  auto init_error() const -> const std::string& { return init_error_; }
+  auto init_error() const -> std::string {
+    return init_state_.load(std::memory_order_acquire) == InitState::Failed ? init_error_ : std::string{};
+  }
   void set_volume_source(std::atomic<float>* vol) { volume_source_ = vol; }
 
  private:
@@ -555,13 +559,14 @@ class PipeWireRouter::LimiterFilterNode {
     // Check initialization state
     const auto state = self->init_state_.load(std::memory_order_acquire);
     if (state != InitState::Ready) {
-      // Output passthrough while initializing
       std::ranges::copy(left_in, left_out.begin());
       std::ranges::copy(right_in, right_out.begin());
 
       if (state == InitState::Uninitialized) {
         self->init_state_.store(InitState::InitPending, std::memory_order_relaxed);
         self->schedule_initialization(rate, n_samples);
+      } else if (state == InitState::Failed && (rate != self->rate_ || n_samples != self->n_samples_)) {
+        self->init_state_.store(InitState::Uninitialized, std::memory_order_relaxed);
       }
       return;
     }
@@ -578,7 +583,6 @@ class PipeWireRouter::LimiterFilterNode {
       std::ranges::copy(left_in, left_out.begin());
       std::ranges::copy(right_in, right_out.begin());
     } else {
-      // Use pre-allocated scratch buffers (no allocation)
       auto scratch_left = std::span<float>(self->scratch_left_).subspan(0, n_samples);
       auto scratch_right = std::span<float>(self->scratch_right_).subspan(0, n_samples);
 
@@ -798,7 +802,9 @@ class PipeWireRouter::ConvolverFilterNode {
 
   void set_bypass(bool value) { bypass_.store(value, std::memory_order_relaxed); }
   auto is_ready() const -> bool { return init_state_.load(std::memory_order_relaxed) == InitState::Ready; }
-  auto init_error() const -> const std::string& { return init_error_; }
+  auto init_error() const -> std::string {
+    return init_state_.load(std::memory_order_acquire) == InitState::Failed ? init_error_ : std::string{};
+  }
   void set_volume_source(std::atomic<float>* vol) { volume_source_ = vol; }
 
  private:
@@ -838,13 +844,14 @@ class PipeWireRouter::ConvolverFilterNode {
     // Check initialization state
     const auto state = self->init_state_.load(std::memory_order_acquire);
     if (state != InitState::Ready) {
-      // Output passthrough while initializing
       std::ranges::copy(left_in, left_out.begin());
       std::ranges::copy(right_in, right_out.begin());
 
       if (state == InitState::Uninitialized) {
         self->init_state_.store(InitState::InitPending, std::memory_order_relaxed);
         self->schedule_initialization(rate, n_samples);
+      } else if (state == InitState::Failed && (rate != self->sample_rate_ || n_samples != self->block_size_)) {
+        self->init_state_.store(InitState::Uninitialized, std::memory_order_relaxed);
       }
       return;
     }
