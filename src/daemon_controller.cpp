@@ -2,7 +2,6 @@
 
 #include <array>
 #include <cstdlib>
-#include <format>
 #include <utility>
 
 #include "app_metadata.hpp"
@@ -11,19 +10,15 @@
 namespace ee {
 
 auto daemon_mode_environment_error() -> std::string {
-  constexpr std::array kUnsupportedEnvPairs = {
-      std::pair{kDisableConvolverEnv, kLegacyDisableConvolverEnv},
-      std::pair{kConvolverRtProcessEnv, kLegacyConvolverRtProcessEnv},
-      std::pair{kConvolverSchedFifoEnv, kLegacyConvolverSchedFifoEnv},
+  constexpr std::array kUnsupportedEnv = {
+      kDisableConvolverEnv,
+      kConvolverRtProcessEnv,
+      kConvolverSchedFifoEnv,
   };
 
-  for (const auto& [canonical_name, legacy_name] : kUnsupportedEnvPairs) {
-    if (const auto env = read_compat_env(canonical_name, legacy_name); env) {
-      if (env.used_legacy) {
-        return std::format("{} is deprecated; use {}. {} is unsupported in daemon mode",
-                           legacy_name, canonical_name, canonical_name);
-      }
-      return std::string(canonical_name) + " is unsupported in daemon mode";
+  for (const auto* name : kUnsupportedEnv) {
+    if (const char* value = std::getenv(name); value != nullptr && *value != '\0') {
+      return std::string(name) + " is unsupported in daemon mode";
     }
   }
   return {};

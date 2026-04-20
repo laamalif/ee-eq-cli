@@ -225,11 +225,8 @@ auto handle_daemon_mode(const std::vector<std::string>& arguments) -> std::optio
     }
 
     if (initial_preset.empty()) {
-      if (const auto env = ee::read_compat_env(ee::kDefaultPresetEnv, ee::kLegacyDefaultPresetEnv); env) {
-        if (env.used_legacy) {
-          ee::log::warn(std::format("{} is deprecated; use {}", ee::kLegacyDefaultPresetEnv, ee::kDefaultPresetEnv));
-        }
-        initial_preset = env.value;
+      if (const char* env = std::getenv(ee::kDefaultPresetEnv); env != nullptr && *env != '\0') {
+        initial_preset = env;
       }
     }
 
@@ -402,9 +399,6 @@ int main(int argc, char* argv[]) {
     ee::log::error(error);
     return EXIT_FAILURE;
   }
-  if (args.preset_from_legacy_env) {
-    ee::log::warn(std::format("{} is deprecated; use {}", ee::kLegacyDefaultPresetEnv, ee::kDefaultPresetEnv));
-  }
   if (args.show_help) {
     ee::log::info(ee::cli_help_text(argc > 0 ? argv[0] : ee::kApplicationName));
     return EXIT_SUCCESS;
@@ -487,8 +481,7 @@ int main(int argc, char* argv[]) {
   }
 
   if (args.preset_from_env) {
-    ee::log::info(std::format("preset source: {} (from {})", loaded.origin,
-                              args.preset_from_legacy_env ? ee::kLegacyDefaultPresetEnv : ee::kDefaultPresetEnv));
+    ee::log::info(std::format("preset source: {} (from {})", loaded.origin, ee::kDefaultPresetEnv));
   } else {
     ee::log::info(std::format("preset source: {}", loaded.origin));
   }

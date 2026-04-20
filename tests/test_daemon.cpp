@@ -67,7 +67,7 @@ void expect(bool condition, std::string_view message) {
 }
 
 auto fixture_path(std::string_view file_name) -> std::string {
-  return std::string(EE_EQ_CLI_TEST_FIXTURE_DIR) + "/" + std::string(file_name);
+  return std::string(EQ_CLI_TEST_FIXTURE_DIR) + "/" + std::string(file_name);
 }
 
 auto make_temp_dir() -> TempDir {
@@ -181,10 +181,6 @@ auto wait_for_status_ready(std::string& last_error) -> bool {
 
 auto make_test_socket_path(const std::filesystem::path& runtime_dir) -> std::filesystem::path {
   return runtime_dir / "eq-cli" / "daemon.sock";
-}
-
-auto make_legacy_test_socket_path(const std::filesystem::path& runtime_dir) -> std::filesystem::path {
-  return runtime_dir / "ee-eq-cli" / "daemon.sock";
 }
 
 void run_test_server_at_path(ee::DaemonController& controller, const std::filesystem::path& socket_path, std::string& error) {
@@ -489,35 +485,6 @@ void test_stale_socket_recovery() {
   std::string error;
   expect(ee::send_daemon_request(ee::DaemonRequest{.command = "shutdown"}, ignored, error),
          "shutdown should succeed after stale-socket recovery");
-  server.join();
-}
-
-void test_legacy_socket_fallback() {
-  ee::log::info("daemon-test: legacy_socket_fallback");
-  const auto temp_dir = make_temp_dir();
-  expect(temp_dir.is_valid(), "temporary runtime dir should be created for legacy fallback");
-  if (!temp_dir.is_valid()) {
-    return;
-  }
-
-  auto runtime_dir_env = ScopedEnv("XDG_RUNTIME_DIR", temp_dir.path.string());
-  auto state = std::make_shared<FakeBackendState>();
-  std::string server_error;
-  std::thread server([&]() {
-    ee::DaemonController controller(std::make_unique<FakeBackend>(state), ee::kApplicationVersion, 1234, "2026-04-16T00:00:00Z");
-    run_test_server_at_path(controller, make_legacy_test_socket_path(temp_dir.path), server_error);
-  });
-
-  expect(wait_for_socket(make_legacy_test_socket_path(temp_dir.path)),
-         "legacy daemon socket should appear");
-  std::string ready_error;
-  expect(wait_for_status_ready(ready_error),
-         "client should fall back to legacy daemon socket path");
-
-  ee::DaemonResponse ignored;
-  std::string error;
-  expect(ee::send_daemon_request(ee::DaemonRequest{.command = "shutdown"}, ignored, error),
-         "shutdown through legacy socket fallback should succeed");
   server.join();
 }
 
@@ -1014,7 +981,6 @@ int main() {
   test_bypass_survives_switch_sink();
   test_daemon_single_instance_refusal();
   test_stale_socket_recovery();
-  test_legacy_socket_fallback();
   test_full_lifecycle();
   test_invalid_preset_no_replace();
   test_apply_rollback_failure();

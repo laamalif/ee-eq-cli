@@ -7,7 +7,7 @@
 #include <cmath>
 #include <cstring>
 #include <cstdlib>
-#include <format>
+#include <cstring>
 #include <sched.h>
 #include <thread>
 
@@ -20,11 +20,8 @@ namespace ee {
 namespace {
 
 auto use_realtime_convolver_thread() -> bool {
-  if (const auto env = read_compat_env(kConvolverSchedFifoEnv, kLegacyConvolverSchedFifoEnv); env) {
-    if (env.used_legacy) {
-      log::warn(std::format("{} is deprecated; use {}", kLegacyConvolverSchedFifoEnv, kConvolverSchedFifoEnv));
-    }
-    return compat_env_enabled(env);
+  if (const char* value = std::getenv(kConvolverSchedFifoEnv); value != nullptr) {
+    return *value != '\0' && std::strcmp(value, "0") != 0;
   }
   return false;
 }

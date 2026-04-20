@@ -46,12 +46,12 @@ namespace ee {
 
 namespace {
 
-constexpr auto kAppId = "com.github.wwmm.ee-eq-cli";
-constexpr auto kVirtualSinkName = "ee_eq_cli_sink";
-constexpr auto kVirtualSinkDescription = "ee-eq-cli Sink";
-constexpr auto kEqNodeName = "ee_eq_cli_equalizer";
+constexpr auto kAppId = "com.github.laamalif.eq-cli";
+constexpr auto kVirtualSinkName = "eq_cli_sink";
+constexpr auto kVirtualSinkDescription = "Equalizer Sink";
+constexpr auto kEqNodeName = "eq_cli_equalizer";
 constexpr auto kEqPluginUri = "http://lsp-plug.in/plugins/lv2/para_equalizer_x32_lr";
-constexpr auto kLimiterNodeName = "ee_eq_cli_limiter";
+constexpr auto kLimiterNodeName = "eq_cli_limiter";
 constexpr auto kLimiterPluginUri = "http://lsp-plug.in/plugins/lv2/sc_limiter_stereo";
 constexpr int kStartupPollIterations = 5000;
 constexpr auto kRapidRemovalWindow = std::chrono::milliseconds(1500);
@@ -87,21 +87,15 @@ auto parse_uint64(const char* value) -> uint64_t {
 }
 
 auto convolver_disabled_by_env() -> bool {
-  if (const auto env = read_compat_env(kDisableConvolverEnv, kLegacyDisableConvolverEnv); env) {
-    if (env.used_legacy) {
-      log::warn(std::format("{} is deprecated; use {}", kLegacyDisableConvolverEnv, kDisableConvolverEnv));
-    }
-    return compat_env_enabled(env);
+  if (const char* value = std::getenv(kDisableConvolverEnv); value != nullptr) {
+    return *value != '\0' && std::strcmp(value, "0") != 0;
   }
   return false;
 }
 
 auto use_rt_convolver_filter() -> bool {
-  if (const auto env = read_compat_env(kConvolverRtProcessEnv, kLegacyConvolverRtProcessEnv); env) {
-    if (env.used_legacy) {
-      log::warn(std::format("{} is deprecated; use {}", kLegacyConvolverRtProcessEnv, kConvolverRtProcessEnv));
-    }
-    return compat_env_enabled(env);
+  if (const char* value = std::getenv(kConvolverRtProcessEnv); value != nullptr) {
+    return *value != '\0' && std::strcmp(value, "0") != 0;
   }
   return false;
 }
@@ -150,11 +144,11 @@ class PipeWireRouter::EqFilterNode {
     pw_properties_set(props, PW_KEY_APP_ID, kAppId);
     pw_properties_set(props, PW_KEY_NODE_NAME, kEqNodeName);
     pw_properties_set(props, PW_KEY_NODE_NICK, "equalizer");
-    pw_properties_set(props, PW_KEY_NODE_DESCRIPTION, "ee-eq-cli Equalizer");
+    pw_properties_set(props, PW_KEY_NODE_DESCRIPTION, "eq-cli Equalizer");
     pw_properties_set(props, PW_KEY_MEDIA_TYPE, "Audio");
     pw_properties_set(props, PW_KEY_MEDIA_CATEGORY, "Duplex");
     pw_properties_set(props, PW_KEY_MEDIA_ROLE, "DSP");
-    pw_properties_set(props, PW_KEY_NODE_GROUP, "ee_eq_cli_group");
+    pw_properties_set(props, PW_KEY_NODE_GROUP, "eq_cli_group");
     pw_properties_set(props, PW_KEY_NODE_PASSIVE, "true");
 
     filter_ = pw_filter_new(core_, kEqNodeName, props);
@@ -429,11 +423,11 @@ class PipeWireRouter::LimiterFilterNode {
     pw_properties_set(props, PW_KEY_APP_ID, kAppId);
     pw_properties_set(props, PW_KEY_NODE_NAME, kLimiterNodeName);
     pw_properties_set(props, PW_KEY_NODE_NICK, "limiter");
-    pw_properties_set(props, PW_KEY_NODE_DESCRIPTION, "ee-eq-cli Limiter");
+    pw_properties_set(props, PW_KEY_NODE_DESCRIPTION, "eq-cli Limiter");
     pw_properties_set(props, PW_KEY_MEDIA_TYPE, "Audio");
     pw_properties_set(props, PW_KEY_MEDIA_CATEGORY, "Duplex");
     pw_properties_set(props, PW_KEY_MEDIA_ROLE, "DSP");
-    pw_properties_set(props, PW_KEY_NODE_GROUP, "ee_eq_cli_group");
+    pw_properties_set(props, PW_KEY_NODE_GROUP, "eq_cli_group");
     pw_properties_set(props, PW_KEY_NODE_PASSIVE, "true");
 
     filter_ = pw_filter_new(core_, kLimiterNodeName, props);
@@ -724,16 +718,16 @@ class PipeWireRouter::ConvolverFilterNode {
     pw_thread_loop_lock(thread_loop_);
     auto* props = pw_properties_new(nullptr, nullptr);
     pw_properties_set(props, PW_KEY_APP_ID, kAppId);
-    pw_properties_set(props, PW_KEY_NODE_NAME, "ee_eq_cli_convolver");
+    pw_properties_set(props, PW_KEY_NODE_NAME, "eq_cli_convolver");
     pw_properties_set(props, PW_KEY_NODE_NICK, "convolver");
-    pw_properties_set(props, PW_KEY_NODE_DESCRIPTION, "ee-eq-cli Convolver");
+    pw_properties_set(props, PW_KEY_NODE_DESCRIPTION, "eq-cli Convolver");
     pw_properties_set(props, PW_KEY_MEDIA_TYPE, "Audio");
     pw_properties_set(props, PW_KEY_MEDIA_CATEGORY, "Duplex");
     pw_properties_set(props, PW_KEY_MEDIA_ROLE, "DSP");
-    pw_properties_set(props, PW_KEY_NODE_GROUP, "ee_eq_cli_group");
+    pw_properties_set(props, PW_KEY_NODE_GROUP, "eq_cli_group");
     pw_properties_set(props, PW_KEY_NODE_PASSIVE, "true");
 
-    filter_ = pw_filter_new(core_, "ee_eq_cli_convolver", props);
+    filter_ = pw_filter_new(core_, "eq_cli_convolver", props);
     if (filter_ == nullptr) {
       pw_properties_free(props);
       pw_thread_loop_unlock(thread_loop_);
@@ -1441,7 +1435,7 @@ void PipeWireRouter::run_due_tasks() {
 auto PipeWireRouter::setup_core(std::string& error) -> bool {
   pw_init(nullptr, nullptr);
 
-  thread_loop_ = pw_thread_loop_new("ee-eq-cli-pipewire", nullptr);
+  thread_loop_ = pw_thread_loop_new("eq-cli-pipewire", nullptr);
   if (thread_loop_ == nullptr) {
     error = "failed to create PipeWire thread loop";
     return false;
@@ -1607,7 +1601,7 @@ void PipeWireRouter::create_virtual_sink(std::string& error) {
   pw_properties_set(props, PW_KEY_NODE_NAME, kVirtualSinkName);
   pw_properties_set(props, PW_KEY_NODE_DESCRIPTION, kVirtualSinkDescription);
   pw_properties_set(props, PW_KEY_NODE_VIRTUAL, "true");
-  pw_properties_set(props, PW_KEY_NODE_GROUP, "ee_eq_cli_group");
+  pw_properties_set(props, PW_KEY_NODE_GROUP, "eq_cli_group");
   pw_properties_set(props, "factory.name", "support.null-audio-sink");
   pw_properties_set(props, "audio.position", "FL,FR");
   pw_properties_set(props, "monitor.channel-volumes", "false");

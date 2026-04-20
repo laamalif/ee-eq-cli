@@ -1,6 +1,7 @@
 #include "cli_args.hpp"
 
 #include <cctype>
+#include <cstdlib>
 #include <format>
 
 #include "app_metadata.hpp"
@@ -127,10 +128,9 @@ auto parse_cli_args(std::span<const std::string> arguments, std::string& error) 
   }
 
   if (args.preset_source.empty() && !args.list_sinks) {
-    if (const auto default_preset = read_compat_env(kDefaultPresetEnv, kLegacyDefaultPresetEnv); default_preset) {
-      args.preset_source = default_preset.value;
+    if (const char* default_preset = std::getenv(kDefaultPresetEnv); default_preset != nullptr && *default_preset != '\0') {
+      args.preset_source = default_preset;
       args.preset_from_env = true;
-      args.preset_from_legacy_env = default_preset.used_legacy;
     }
   }
 
@@ -162,10 +162,9 @@ auto cli_help_text(std::string_view executable_name) -> std::string {
       "      {} bypass on|off\n"
       "      {} volume <0.0-1.5>\n"
       "      {} list-sinks\n"
+      "      {} switch-sink <name-or-serial>\n"
       "      {} shutdown\n\n"
-      "Convenience:\n"
-      "      {} switch-sink <name-or-serial>\n\n"
-      "Offline:\n"
+      "Standalone:\n"
       "  -p, --preset <preset>  Local EasyEffects EQ preset path (one-shot mode).\n"
       "      --convert-autoeq <text>\n"
       "                        Convert a local AutoEQ-style parametric EQ text file into EasyEffects JSON.\n"
@@ -178,8 +177,7 @@ auto cli_help_text(std::string_view executable_name) -> std::string {
       "\n"
       "Environment:\n"
       "      {}  Fallback local preset path when --preset is omitted\n"
-      "          (standalone mode and daemon start bootstrap only).\n"
-      "      {}  Legacy alias for one release.\n",
+      "          (standalone mode and daemon start bootstrap only).\n",
       executable_name,
       executable_name,
       executable_name,
@@ -194,8 +192,7 @@ auto cli_help_text(std::string_view executable_name) -> std::string {
       executable_name,
       executable_name,
       executable_name,
-      kDefaultPresetEnv,
-      kLegacyDefaultPresetEnv);
+      kDefaultPresetEnv);
 }
 
 }  // namespace ee

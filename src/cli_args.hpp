@@ -17,7 +17,6 @@ struct CliArgs {
   bool show_help = false;
   bool show_version = false;
   bool preset_from_env = false;
-  bool preset_from_legacy_env = false;
 };
 
 auto parse_cli_args(std::span<const std::string> arguments, std::string& error) -> CliArgs;

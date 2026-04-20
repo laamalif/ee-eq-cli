@@ -75,7 +75,7 @@ if(BUILD_TESTING)
         ${ZITACONVOLVER_LIB}
     )
     target_compile_definitions(eq-cli-tests PRIVATE
-        EE_EQ_CLI_TEST_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures"
+        EQ_CLI_TEST_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures"
     )
     add_test(NAME eq-cli-tests COMMAND eq-cli-tests)
 
@@ -96,7 +96,7 @@ if(BUILD_TESTING)
         PkgConfig::LIBNLOHMANNJSON
     )
     target_compile_definitions(eq-cli-daemon-tests PRIVATE
-        EE_EQ_CLI_TEST_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures"
+        EQ_CLI_TEST_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures"
     )
     add_test(NAME eq-cli-daemon-tests COMMAND eq-cli-daemon-tests)
 endif()

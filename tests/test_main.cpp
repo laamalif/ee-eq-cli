@@ -53,7 +53,7 @@ void expect_near(double actual, double expected, double tolerance, std::string_v
 }
 
 auto fixture_path(std::string_view file_name) -> std::string {
-  return std::string(EE_EQ_CLI_TEST_FIXTURE_DIR) + "/" + std::string(file_name);
+  return std::string(EQ_CLI_TEST_FIXTURE_DIR) + "/" + std::string(file_name);
 }
 
 auto make_temp_dir() -> TempDir {
@@ -68,11 +68,6 @@ auto make_temp_dir() -> TempDir {
 auto resolver_ir_dir(const TempDir& temp_dir) -> std::filesystem::path {
   setenv("XDG_DATA_HOME", temp_dir.path.c_str(), 1);
   return temp_dir.path / "eq-cli" / "irs";
-}
-
-auto legacy_resolver_ir_dir(const TempDir& temp_dir) -> std::filesystem::path {
-  setenv("XDG_DATA_HOME", temp_dir.path.c_str(), 1);
-  return temp_dir.path / "ee-eq-cli" / "irs";
 }
 
 void test_cli_args_accept_local_preset() {
@@ -138,7 +133,6 @@ void test_cli_args_allow_list_sinks_without_preset() {
 
 void test_cli_args_require_preset_or_env() {
   unsetenv(ee::kDefaultPresetEnv);
-  unsetenv(ee::kLegacyDefaultPresetEnv);
 
   std::string error;
   const std::vector<std::string> arguments = {"eq-cli"};
@@ -150,7 +144,6 @@ void test_cli_args_require_preset_or_env() {
 
 void test_cli_args_use_default_preset_env() {
   setenv(ee::kDefaultPresetEnv, fixture_path("Boosted.json").c_str(), 1);
-  unsetenv(ee::kLegacyDefaultPresetEnv);
 
   std::string error;
   const std::vector<std::string> arguments = {"eq-cli"};
@@ -158,40 +151,8 @@ void test_cli_args_use_default_preset_env() {
   expect(error.empty(), "default preset env should satisfy the preset requirement");
   expect(args.preset_source == fixture_path("Boosted.json"), "default preset env should populate the preset path");
   expect(args.preset_from_env, "default preset env should be marked as env-derived");
-  expect(!args.preset_from_legacy_env, "canonical preset env should not set legacy marker");
 
   unsetenv(ee::kDefaultPresetEnv);
-}
-
-void test_cli_args_use_legacy_default_preset_env() {
-  unsetenv(ee::kDefaultPresetEnv);
-  setenv(ee::kLegacyDefaultPresetEnv, fixture_path("Boosted.json").c_str(), 1);
-
-  std::string error;
-  const std::vector<std::string> arguments = {"eq-cli"};
-  const auto args = ee::parse_cli_args(arguments, error);
-  expect(error.empty(), "legacy preset env should satisfy the preset requirement");
-  expect(args.preset_source == fixture_path("Boosted.json"), "legacy preset env should populate the preset path");
-  expect(args.preset_from_env, "legacy preset env should be marked as env-derived");
-  expect(args.preset_from_legacy_env, "legacy preset env should set legacy marker");
-
-  unsetenv(ee::kLegacyDefaultPresetEnv);
-}
-
-void test_cli_args_new_default_preset_env_wins_over_legacy() {
-  setenv(ee::kDefaultPresetEnv, fixture_path("Boosted.json").c_str(), 1);
-  setenv(ee::kLegacyDefaultPresetEnv,
-         fixture_path("Bass Enhancing + Perfect EQ - Low Latency.json").c_str(), 1);
-
-  std::string error;
-  const std::vector<std::string> arguments = {"eq-cli"};
-  const auto args = ee::parse_cli_args(arguments, error);
-  expect(error.empty(), "canonical preset env should win when both env vars are set");
-  expect(args.preset_source == fixture_path("Boosted.json"), "canonical env should take precedence over legacy env");
-  expect(!args.preset_from_legacy_env, "canonical env precedence should clear legacy marker");
-
-  unsetenv(ee::kDefaultPresetEnv);
-  unsetenv(ee::kLegacyDefaultPresetEnv);
 }
 
 void test_cli_args_cli_wins_over_default_preset_env() {
@@ -829,30 +790,6 @@ void test_resolve_kernel_name_from_path() {
          "resolved name should be derived from kernel_path stem");
 }
 
-void test_resolve_kernel_legacy_dir_fallback() {
-  const auto temp_dir = make_temp_dir();
-  expect(temp_dir.is_valid(), "temp dir for legacy resolver fallback should be created");
-  if (!temp_dir.is_valid()) {
-    return;
-  }
-
-  const auto legacy_ir_dir = legacy_resolver_ir_dir(temp_dir);
-  expect(std::filesystem::create_directories(legacy_ir_dir), "legacy IR directory should be created");
-
-  const auto src = fixture_path(std::string(kIrsFixtureName) + ".irs");
-  const auto dst = legacy_ir_dir / (std::string(kIrsFixtureName) + ".irs");
-  std::filesystem::copy_file(src, dst);
-
-  ee::ConvolverPreset preset;
-  preset.kernel_name = kIrsFixtureName;
-  std::string warning;
-  const auto resolved = ee::resolve_convolver_kernel(preset, warning);
-  expect(resolved.has_value(), "legacy IR directory should still resolve kernels");
-  expect(warning.empty(), "legacy exact match should not warn");
-  expect(resolved.has_value() && resolved->path == dst.string(),
-         "legacy IR directory fallback should preserve resolved path");
-}
-
 }  // namespace
 
 int main() {
@@ -865,8 +802,6 @@ int main() {
   test_cli_args_allow_list_sinks_without_preset();
   test_cli_args_require_preset_or_env();
   test_cli_args_use_default_preset_env();
-  test_cli_args_use_legacy_default_preset_env();
-  test_cli_args_new_default_preset_env_wins_over_legacy();
   test_cli_args_cli_wins_over_default_preset_env();
   test_load_preset_local_file();
   test_load_preset_missing_file();
@@ -923,7 +858,6 @@ int main() {
 
   test_resolve_kernel_real_irs();
   test_resolve_kernel_name_from_path();
-  test_resolve_kernel_legacy_dir_fallback();
 
   if (g_failures != 0) {
     ee::log::error(std::format("{} test assertion(s) failed", g_failures));
