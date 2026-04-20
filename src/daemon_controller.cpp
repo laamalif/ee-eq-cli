@@ -2,22 +2,28 @@
 
 #include <array>
 #include <cstdlib>
+#include <format>
 #include <utility>
 
+#include "app_metadata.hpp"
 #include "preset_source.hpp"
 
 namespace ee {
 
 auto daemon_mode_environment_error() -> std::string {
-  constexpr std::array kUnsupportedEnv = {
-      "EE_EQ_CLI_DISABLE_CONVOLVER",
-      "EE_EQ_CLI_CONVOLVER_RT_PROCESS",
-      "EE_EQ_CLI_CONVOLVER_SCHED_FIFO",
+  constexpr std::array kUnsupportedEnvPairs = {
+      std::pair{kDisableConvolverEnv, kLegacyDisableConvolverEnv},
+      std::pair{kConvolverRtProcessEnv, kLegacyConvolverRtProcessEnv},
+      std::pair{kConvolverSchedFifoEnv, kLegacyConvolverSchedFifoEnv},
   };
 
-  for (const auto* name : kUnsupportedEnv) {
-    if (const char* value = std::getenv(name); value != nullptr && *value != '\0') {
-      return std::string(name) + " is unsupported in daemon mode";
+  for (const auto& [canonical_name, legacy_name] : kUnsupportedEnvPairs) {
+    if (const auto env = read_compat_env(canonical_name, legacy_name); env) {
+      if (env.used_legacy) {
+        return std::format("{} is deprecated; use {}. {} is unsupported in daemon mode",
+                           legacy_name, canonical_name, canonical_name);
+      }
+      return std::string(canonical_name) + " is unsupported in daemon mode";
     }
   }
   return {};
@@ -116,7 +122,7 @@ auto DaemonController::status_locked() const -> DaemonStatus {
 
 auto DaemonController::apply_locked(const DaemonRequest& request) -> DaemonResponse {
   if (request.preset_path.empty()) {
-    return {.ok = false, .error = "apply requires a preset path; usage: ee-eq-cli apply <preset>", .status = status_locked()};
+    return {.ok = false, .error = "apply requires a preset path; usage: eq-cli apply <preset>", .status = status_locked()};
   }
 
   std::string error;
@@ -193,7 +199,7 @@ auto DaemonController::apply_locked(const DaemonRequest& request) -> DaemonRespo
 
 auto DaemonController::enable_locked() -> DaemonResponse {
   if (!desired_.has_value()) {
-    return {.ok = false, .error = "no preset loaded; run 'ee-eq-cli apply <preset>' first", .status = status_locked()};
+    return {.ok = false, .error = "no preset loaded; run 'eq-cli apply <preset>' first", .status = status_locked()};
   }
   if (desired_->enabled && status_.session_state == SessionLifecycleState::Enabled) {
     return {.ok = true, .status = status_locked()};
@@ -248,10 +254,10 @@ auto DaemonController::list_sinks_locked() -> DaemonResponse {
 
 auto DaemonController::switch_sink_locked(const DaemonRequest& request) -> DaemonResponse {
   if (!desired_.has_value()) {
-    return {.ok = false, .error = "no preset loaded; run 'ee-eq-cli apply <preset>' first", .status = status_locked()};
+    return {.ok = false, .error = "no preset loaded; run 'eq-cli apply <preset>' first", .status = status_locked()};
   }
   if (request.sink_selector.empty()) {
-    return {.ok = false, .error = "switch-sink requires a sink name or serial; usage: ee-eq-cli switch-sink <name-or-serial>", .status = status_locked()};
+    return {.ok = false, .error = "switch-sink requires a sink name or serial; usage: eq-cli switch-sink <name-or-serial>", .status = status_locked()};
   }
 
   const auto previous_sink = desired_->sink_selector;
@@ -301,14 +307,14 @@ auto DaemonController::switch_sink_locked(const DaemonRequest& request) -> Daemo
 
 auto DaemonController::bypass_locked(const DaemonRequest& request) -> DaemonResponse {
   if (!desired_.has_value() || !desired_->enabled) {
-    return {.ok = false, .error = "no active session; run 'ee-eq-cli apply <preset>' to start one", .status = status_locked()};
+    return {.ok = false, .error = "no active session; run 'eq-cli apply <preset>' to start one", .status = status_locked()};
   }
 
   const auto& value = request.sink_selector;
   const bool is_on = (value == "on" || value == "true" || value == "1");
   const bool is_off = (value == "off" || value == "false" || value == "0");
   if (!is_on && !is_off) {
-    return {.ok = false, .error = "bypass requires on or off; usage: ee-eq-cli bypass on|off", .status = status_locked()};
+    return {.ok = false, .error = "bypass requires on or off; usage: eq-cli bypass on|off", .status = status_locked()};
   }
   desired_->bypass = is_on;
   backend_->set_bypass(is_on);
@@ -355,7 +361,7 @@ void DaemonController::set_runtime_state_from_backend_locked() {
 
 auto DaemonController::volume_locked(const DaemonRequest& request) -> DaemonResponse {
   if (!desired_.has_value() || !desired_->enabled) {
-    return {.ok = false, .error = "no active session; run 'ee-eq-cli apply <preset>' to start one", .status = status_locked()};
+    return {.ok = false, .error = "no active session; run 'eq-cli apply <preset>' to start one", .status = status_locked()};
   }
 
   float value = 0.0F;
@@ -363,10 +369,10 @@ auto DaemonController::volume_locked(const DaemonRequest& request) -> DaemonResp
   try {
     value = std::stof(request.sink_selector, &pos);
     if (pos != request.sink_selector.length()) {
-      return {.ok = false, .error = "volume requires a number; usage: ee-eq-cli volume <0.0-1.5>", .status = status_locked()};
+      return {.ok = false, .error = "volume requires a number; usage: eq-cli volume <0.0-1.5>", .status = status_locked()};
     }
   } catch (...) {
-    return {.ok = false, .error = "volume requires a number; usage: ee-eq-cli volume <0.0-1.5>", .status = status_locked()};
+    return {.ok = false, .error = "volume requires a number; usage: eq-cli volume <0.0-1.5>", .status = status_locked()};
   }
 
   if (value < 0.0F || value > 1.5F) {

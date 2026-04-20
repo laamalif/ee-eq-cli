@@ -3,11 +3,11 @@
 #include <cctype>
 #include <format>
 
+#include "app_metadata.hpp"
+
 namespace ee {
 
 namespace {
-
-constexpr auto kDefaultPresetEnv = "EE_EQ_CLI_DEFAULT_PRESET";
 
 auto is_url(std::string_view value) -> bool {
   auto starts_with_ci = [value](std::string_view prefix) {
@@ -127,14 +127,15 @@ auto parse_cli_args(std::span<const std::string> arguments, std::string& error) 
   }
 
   if (args.preset_source.empty() && !args.list_sinks) {
-    if (const char* default_preset = std::getenv(kDefaultPresetEnv); default_preset != nullptr && *default_preset != '\0') {
-      args.preset_source = default_preset;
+    if (const auto default_preset = read_compat_env(kDefaultPresetEnv, kLegacyDefaultPresetEnv); default_preset) {
+      args.preset_source = default_preset.value;
       args.preset_from_env = true;
+      args.preset_from_legacy_env = default_preset.used_legacy;
     }
   }
 
   if (args.preset_source.empty() && !args.list_sinks) {
-    error = "no preset specified; use --preset <path> or set EE_EQ_CLI_DEFAULT_PRESET";
+    error = std::format("no preset specified; use --preset <path> or set {}", kDefaultPresetEnv);
     return {};
   }
   if (is_url(args.preset_source)) {
@@ -148,7 +149,7 @@ auto parse_cli_args(std::span<const std::string> arguments, std::string& error) 
 auto cli_help_text(std::string_view executable_name) -> std::string {
   return std::format(
       "Usage: {} [options]\n"
-      "Load an EasyEffects EQ preset into a minimal headless PipeWire/LV2 runtime.\n\n"
+      "Load an EasyEffects-compatible EQ preset into a minimal headless PipeWire/LV2 runtime.\n\n"
       "Daemon:\n"
       "      {} daemon start [--preset <path>] [--sink <name>]\n"
       "      {} status\n"
@@ -176,8 +177,9 @@ auto cli_help_text(std::string_view executable_name) -> std::string {
       "  -v, --version          Display version information and exit.\n"
       "\n"
       "Environment:\n"
-      "      EE_EQ_CLI_DEFAULT_PRESET  Fallback local preset path when --preset is omitted\n"
-      "                                (standalone mode and daemon start bootstrap only).\n",
+      "      {}  Fallback local preset path when --preset is omitted\n"
+      "          (standalone mode and daemon start bootstrap only).\n"
+      "      {}  Legacy alias for one release.\n",
       executable_name,
       executable_name,
       executable_name,
@@ -191,7 +193,9 @@ auto cli_help_text(std::string_view executable_name) -> std::string {
       executable_name,
       executable_name,
       executable_name,
-      executable_name);
+      executable_name,
+      kDefaultPresetEnv,
+      kLegacyDefaultPresetEnv);
 }
 
 }  // namespace ee

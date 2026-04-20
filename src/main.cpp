@@ -64,7 +64,7 @@ void print_status_json(const ee::DaemonStatus& status) {
 
 auto format_doctor_output(const ee::DaemonStatus& status) -> std::string {
   std::string output = std::format(
-      "ee-eq-cli {} (pid {}, up since {})\n"
+      "eq-cli {} (pid {}, up since {})\n"
       "daemon:   {}\n"
       "session:  {}\n"
       "health:   {}",
@@ -195,7 +195,7 @@ auto handle_daemon_mode(const std::vector<std::string>& arguments) -> std::optio
 
   if (arguments[1] == "daemon") {
     if (arguments.size() < 3 || arguments[2] != "start") {
-      ee::log::error("usage: ee-eq-cli daemon start [--preset <path>] [--sink <name>]");
+      ee::log::error("usage: eq-cli daemon start [--preset <path>] [--sink <name>]");
       return EXIT_FAILURE;
     }
     if (const auto env_error = ee::daemon_mode_environment_error(); !env_error.empty()) {
@@ -225,8 +225,11 @@ auto handle_daemon_mode(const std::vector<std::string>& arguments) -> std::optio
     }
 
     if (initial_preset.empty()) {
-      if (const char* env = std::getenv("EE_EQ_CLI_DEFAULT_PRESET"); env != nullptr && *env != '\0') {
-        initial_preset = env;
+      if (const auto env = ee::read_compat_env(ee::kDefaultPresetEnv, ee::kLegacyDefaultPresetEnv); env) {
+        if (env.used_legacy) {
+          ee::log::warn(std::format("{} is deprecated; use {}", ee::kLegacyDefaultPresetEnv, ee::kDefaultPresetEnv));
+        }
+        initial_preset = env.value;
       }
     }
 
@@ -295,7 +298,7 @@ auto handle_daemon_mode(const std::vector<std::string>& arguments) -> std::optio
 
   if (arguments[1] == "apply") {
     if (arguments.size() < 3) {
-      ee::log::error("usage: ee-eq-cli apply <preset> [--sink <name-or-serial>]");
+      ee::log::error("usage: eq-cli apply <preset> [--sink <name-or-serial>]");
       return EXIT_FAILURE;
     }
 
@@ -322,7 +325,7 @@ auto handle_daemon_mode(const std::vector<std::string>& arguments) -> std::optio
 
   if (arguments[1] == "switch-sink") {
     if (arguments.size() < 3) {
-      ee::log::error("usage: ee-eq-cli switch-sink <name-or-serial>");
+      ee::log::error("usage: eq-cli switch-sink <name-or-serial>");
       return EXIT_FAILURE;
     }
     if (const auto response =
@@ -336,7 +339,7 @@ auto handle_daemon_mode(const std::vector<std::string>& arguments) -> std::optio
 
   if (arguments[1] == "bypass") {
     if (arguments.size() < 3) {
-      ee::log::error("usage: ee-eq-cli bypass on|off");
+      ee::log::error("usage: eq-cli bypass on|off");
       return EXIT_FAILURE;
     }
     if (const auto response =
@@ -350,7 +353,7 @@ auto handle_daemon_mode(const std::vector<std::string>& arguments) -> std::optio
 
   if (arguments[1] == "volume") {
     if (arguments.size() < 3) {
-      ee::log::error("usage: ee-eq-cli volume <0.0-1.5>");
+      ee::log::error("usage: eq-cli volume <0.0-1.5>");
       return EXIT_FAILURE;
     }
     if (const auto response =
@@ -398,6 +401,9 @@ int main(int argc, char* argv[]) {
   if (!error.empty()) {
     ee::log::error(error);
     return EXIT_FAILURE;
+  }
+  if (args.preset_from_legacy_env) {
+    ee::log::warn(std::format("{} is deprecated; use {}", ee::kLegacyDefaultPresetEnv, ee::kDefaultPresetEnv));
   }
   if (args.show_help) {
     ee::log::info(ee::cli_help_text(argc > 0 ? argv[0] : ee::kApplicationName));
@@ -481,7 +487,8 @@ int main(int argc, char* argv[]) {
   }
 
   if (args.preset_from_env) {
-    ee::log::info(std::format("preset source: {} (from EE_EQ_CLI_DEFAULT_PRESET)", loaded.origin));
+    ee::log::info(std::format("preset source: {} (from {})", loaded.origin,
+                              args.preset_from_legacy_env ? ee::kLegacyDefaultPresetEnv : ee::kDefaultPresetEnv));
   } else {
     ee::log::info(std::format("preset source: {}", loaded.origin));
   }
@@ -503,7 +510,7 @@ int main(int argc, char* argv[]) {
     return EXIT_FAILURE;
   }
 
-  ee::log::info(std::format("ee-eq-cli active with preset: {}", loaded.origin));
+  ee::log::info(std::format("eq-cli active with preset: {}", loaded.origin));
   wait_for_shutdown_signal(router);
   router.stop();
   return EXIT_SUCCESS;

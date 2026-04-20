@@ -16,6 +16,7 @@
 
 #include <nlohmann/json.hpp>
 
+#include "app_metadata.hpp"
 #include "logging.hpp"
 
 namespace ee {
@@ -40,6 +41,37 @@ auto write_all(int fd, std::string_view payload, std::string& error) -> bool {
     remaining -= static_cast<size_t>(bytes);
   }
   return true;
+}
+
+auto connect_socket(int fd, const std::string& path) -> bool {
+  sockaddr_un address{};
+  address.sun_family = AF_UNIX;
+  std::strncpy(address.sun_path, path.c_str(), sizeof(address.sun_path) - 1);
+  return connect(fd, reinterpret_cast<sockaddr*>(&address), sizeof(address)) == 0;
+}
+
+auto daemon_socket_path_for_dir(std::string_view dir_name, std::string& error, const bool create_directory) -> std::string {
+  const char* runtime_dir = std::getenv("XDG_RUNTIME_DIR");
+  if (runtime_dir == nullptr || *runtime_dir == '\0') {
+    error = "XDG_RUNTIME_DIR is required for daemon mode";
+    return {};
+  }
+
+  const auto dir = std::filesystem::path(runtime_dir) / dir_name;
+  if (create_directory) {
+    std::error_code fs_error;
+    std::filesystem::create_directories(dir, fs_error);
+    if (fs_error) {
+      error = std::format("failed to create daemon runtime directory: {}", fs_error.message());
+      return {};
+    }
+  }
+
+  return (dir / "daemon.sock").string();
+}
+
+auto legacy_daemon_socket_path(std::string& error) -> std::string {
+  return daemon_socket_path_for_dir(kLegacyRuntimeDirName, error, false);
 }
 
 auto bind_server_socket(const std::string& path, std::string& error) -> int {
@@ -132,21 +164,7 @@ void write_response_json(int fd, const DaemonResponse& response) {
 }  // namespace
 
 auto daemon_socket_path(std::string& error) -> std::string {
-  const char* runtime_dir = std::getenv("XDG_RUNTIME_DIR");
-  if (runtime_dir == nullptr || *runtime_dir == '\0') {
-    error = "XDG_RUNTIME_DIR is required for daemon mode";
-    return {};
-  }
-
-  const auto dir = std::filesystem::path(runtime_dir) / "ee-eq-cli";
-  std::error_code fs_error;
-  std::filesystem::create_directories(dir, fs_error);
-  if (fs_error) {
-    error = std::format("failed to create daemon runtime directory: {}", fs_error.message());
-    return {};
-  }
-
-  return (dir / "daemon.sock").string();
+  return daemon_socket_path_for_dir(kRuntimeDirName, error, true);
 }
 
 auto run_daemon_ipc_server(DaemonController& controller, std::string& error, const bool watch_signals) -> int {
@@ -262,24 +280,38 @@ auto run_daemon_ipc_server(DaemonController& controller, std::string& error, con
 }
 
 auto send_daemon_request(const DaemonRequest& request, DaemonResponse& response, std::string& error) -> bool {
-  const auto socket_path = daemon_socket_path(error);
+  const auto socket_path = daemon_socket_path_for_dir(kRuntimeDirName, error, false);
   if (!error.empty()) {
     return false;
   }
 
-  const int fd = socket(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0);
+  int fd = socket(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0);
   if (fd == -1) {
     error = std::format("failed to create daemon client socket: {}", std::strerror(errno));
     return false;
   }
 
-  sockaddr_un address{};
-  address.sun_family = AF_UNIX;
-  std::strncpy(address.sun_path, socket_path.c_str(), sizeof(address.sun_path) - 1);
-  if (connect(fd, reinterpret_cast<sockaddr*>(&address), sizeof(address)) != 0) {
-    error = std::format("daemon not running; start it with 'ee-eq-cli daemon start' ({})", std::strerror(errno));
-    close(fd);
-    return false;
+  if (!connect_socket(fd, socket_path)) {
+    const int connect_errno = errno;
+    std::string legacy_error;
+    const auto legacy_socket_path = legacy_daemon_socket_path(legacy_error);
+    if (legacy_error.empty() && !legacy_socket_path.empty()) {
+      close(fd);
+      fd = socket(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0);
+      if (fd == -1) {
+        error = std::format("failed to create daemon client socket: {}", std::strerror(errno));
+        return false;
+      }
+      if (!connect_socket(fd, legacy_socket_path)) {
+        error = std::format("daemon not running; start it with 'eq-cli daemon start' ({})", std::strerror(connect_errno));
+        close(fd);
+        return false;
+      }
+    } else {
+      error = std::format("daemon not running; start it with 'eq-cli daemon start' ({})", std::strerror(connect_errno));
+      close(fd);
+      return false;
+    }
   }
 
   const auto encoded = nlohmann::json(request).dump();

@@ -9,6 +9,7 @@
 #include <vector>
 #include <string_view>
 
+#include "app_metadata.hpp"
 #include "cli_args.hpp"
 #include "logging.hpp"
 #include "convolver_host.hpp"
@@ -57,7 +58,7 @@ auto fixture_path(std::string_view file_name) -> std::string {
 
 auto make_temp_dir() -> TempDir {
   std::array<char, 64> pattern{};
-  std::snprintf(pattern.data(), pattern.size(), "/tmp/ee-eq-cli-tests-XXXXXX");
+  std::snprintf(pattern.data(), pattern.size(), "/tmp/eq-cli-tests-XXXXXX");
   if (char* created = mkdtemp(pattern.data()); created != nullptr) {
     return TempDir{.path = created};
   }
@@ -66,12 +67,17 @@ auto make_temp_dir() -> TempDir {
 
 auto resolver_ir_dir(const TempDir& temp_dir) -> std::filesystem::path {
   setenv("XDG_DATA_HOME", temp_dir.path.c_str(), 1);
+  return temp_dir.path / "eq-cli" / "irs";
+}
+
+auto legacy_resolver_ir_dir(const TempDir& temp_dir) -> std::filesystem::path {
+  setenv("XDG_DATA_HOME", temp_dir.path.c_str(), 1);
   return temp_dir.path / "ee-eq-cli" / "irs";
 }
 
 void test_cli_args_accept_local_preset() {
   std::string error;
-  const std::vector<std::string> arguments = {"ee-eq-cli", "--preset", fixture_path("Boosted.json")};
+  const std::vector<std::string> arguments = {"eq-cli", "--preset", fixture_path("Boosted.json")};
   const auto args = ee::parse_cli_args(arguments, error);
   expect(error.empty(), "local preset path should parse");
   expect(args.preset_source == fixture_path("Boosted.json"), "parsed preset path should be preserved");
@@ -81,7 +87,7 @@ void test_cli_args_accept_local_preset() {
 
 void test_cli_args_convert_autoeq() {
   std::string error;
-  const std::vector<std::string> arguments = {"ee-eq-cli", "--convert-autoeq", fixture_path("Boosted.json")};
+  const std::vector<std::string> arguments = {"eq-cli", "--convert-autoeq", fixture_path("Boosted.json")};
   const auto args = ee::parse_cli_args(arguments, error);
   expect(error.empty(), "--convert-autoeq should parse");
   expect(args.convert_autoeq_source == fixture_path("Boosted.json"), "--convert-autoeq should preserve its input path");
@@ -90,7 +96,7 @@ void test_cli_args_convert_autoeq() {
 
 void test_cli_args_convert_autoeq_output() {
   std::string error;
-  const std::vector<std::string> arguments = {"ee-eq-cli", "--convert-autoeq", "input.txt", "--output", "preset.json"};
+  const std::vector<std::string> arguments = {"eq-cli", "--convert-autoeq", "input.txt", "--output", "preset.json"};
   const auto args = ee::parse_cli_args(arguments, error);
   expect(error.empty(), "--output should be accepted with --convert-autoeq");
   expect(args.output_path == "preset.json", "--output should preserve its output path");
@@ -98,7 +104,7 @@ void test_cli_args_convert_autoeq_output() {
 
 void test_cli_args_output_requires_convert_autoeq() {
   std::string error;
-  const std::vector<std::string> arguments = {"ee-eq-cli", "--output", "preset.json"};
+  const std::vector<std::string> arguments = {"eq-cli", "--output", "preset.json"};
   const auto args = ee::parse_cli_args(arguments, error);
   expect(args.output_path.empty(), "--output alone should not be accepted");
   expect(error == "--output requires --convert-autoeq", "--output alone should produce the expected error");
@@ -106,7 +112,7 @@ void test_cli_args_output_requires_convert_autoeq() {
 
 void test_cli_args_convert_autoeq_conflicts_with_preset() {
   std::string error;
-  const std::vector<std::string> arguments = {"ee-eq-cli", "--preset", "a.json", "--convert-autoeq", "b.txt"};
+  const std::vector<std::string> arguments = {"eq-cli", "--preset", "a.json", "--convert-autoeq", "b.txt"};
   const auto args = ee::parse_cli_args(arguments, error);
   expect(args.preset_source.empty(), "conflicting preset sources should fail parsing");
   expect(error == "--preset and --convert-autoeq cannot be used together",
@@ -115,7 +121,7 @@ void test_cli_args_convert_autoeq_conflicts_with_preset() {
 
 void test_cli_args_reject_url_preset() {
   std::string error;
-  const std::vector<std::string> arguments = {"ee-eq-cli", "--preset", "https://example.invalid/preset.json"};
+  const std::vector<std::string> arguments = {"eq-cli", "--preset", "https://example.invalid/preset.json"};
   const auto args = ee::parse_cli_args(arguments, error);
   expect(args.preset_source.empty(), "URL preset should not be accepted");
   expect(error == "--preset must be a local file path; URL presets are no longer supported",
@@ -124,42 +130,76 @@ void test_cli_args_reject_url_preset() {
 
 void test_cli_args_allow_list_sinks_without_preset() {
   std::string error;
-  const std::vector<std::string> arguments = {"ee-eq-cli", "--list-sinks"};
+  const std::vector<std::string> arguments = {"eq-cli", "--list-sinks"};
   const auto args = ee::parse_cli_args(arguments, error);
   expect(error.empty(), "--list-sinks should not require --preset");
   expect(args.list_sinks, "--list-sinks should be parsed");
 }
 
 void test_cli_args_require_preset_or_env() {
-  unsetenv("EE_EQ_CLI_DEFAULT_PRESET");
+  unsetenv(ee::kDefaultPresetEnv);
+  unsetenv(ee::kLegacyDefaultPresetEnv);
 
   std::string error;
-  const std::vector<std::string> arguments = {"ee-eq-cli"};
+  const std::vector<std::string> arguments = {"eq-cli"};
   const auto args = ee::parse_cli_args(arguments, error);
   expect(args.preset_source.empty(), "missing preset should not produce a preset path");
-  expect(error == "no preset specified; use --preset <path> or set EE_EQ_CLI_DEFAULT_PRESET",
+  expect(error == std::format("no preset specified; use --preset <path> or set {}", ee::kDefaultPresetEnv),
          "missing preset should produce the actionable error");
 }
 
 void test_cli_args_use_default_preset_env() {
-  setenv("EE_EQ_CLI_DEFAULT_PRESET", fixture_path("Boosted.json").c_str(), 1);
+  setenv(ee::kDefaultPresetEnv, fixture_path("Boosted.json").c_str(), 1);
+  unsetenv(ee::kLegacyDefaultPresetEnv);
 
   std::string error;
-  const std::vector<std::string> arguments = {"ee-eq-cli"};
+  const std::vector<std::string> arguments = {"eq-cli"};
   const auto args = ee::parse_cli_args(arguments, error);
   expect(error.empty(), "default preset env should satisfy the preset requirement");
   expect(args.preset_source == fixture_path("Boosted.json"), "default preset env should populate the preset path");
   expect(args.preset_from_env, "default preset env should be marked as env-derived");
+  expect(!args.preset_from_legacy_env, "canonical preset env should not set legacy marker");
 
-  unsetenv("EE_EQ_CLI_DEFAULT_PRESET");
+  unsetenv(ee::kDefaultPresetEnv);
+}
+
+void test_cli_args_use_legacy_default_preset_env() {
+  unsetenv(ee::kDefaultPresetEnv);
+  setenv(ee::kLegacyDefaultPresetEnv, fixture_path("Boosted.json").c_str(), 1);
+
+  std::string error;
+  const std::vector<std::string> arguments = {"eq-cli"};
+  const auto args = ee::parse_cli_args(arguments, error);
+  expect(error.empty(), "legacy preset env should satisfy the preset requirement");
+  expect(args.preset_source == fixture_path("Boosted.json"), "legacy preset env should populate the preset path");
+  expect(args.preset_from_env, "legacy preset env should be marked as env-derived");
+  expect(args.preset_from_legacy_env, "legacy preset env should set legacy marker");
+
+  unsetenv(ee::kLegacyDefaultPresetEnv);
+}
+
+void test_cli_args_new_default_preset_env_wins_over_legacy() {
+  setenv(ee::kDefaultPresetEnv, fixture_path("Boosted.json").c_str(), 1);
+  setenv(ee::kLegacyDefaultPresetEnv,
+         fixture_path("Bass Enhancing + Perfect EQ - Low Latency.json").c_str(), 1);
+
+  std::string error;
+  const std::vector<std::string> arguments = {"eq-cli"};
+  const auto args = ee::parse_cli_args(arguments, error);
+  expect(error.empty(), "canonical preset env should win when both env vars are set");
+  expect(args.preset_source == fixture_path("Boosted.json"), "canonical env should take precedence over legacy env");
+  expect(!args.preset_from_legacy_env, "canonical env precedence should clear legacy marker");
+
+  unsetenv(ee::kDefaultPresetEnv);
+  unsetenv(ee::kLegacyDefaultPresetEnv);
 }
 
 void test_cli_args_cli_wins_over_default_preset_env() {
-  setenv("EE_EQ_CLI_DEFAULT_PRESET", fixture_path("Boosted.json").c_str(), 1);
+  setenv(ee::kDefaultPresetEnv, fixture_path("Boosted.json").c_str(), 1);
 
   std::string error;
   const std::vector<std::string> arguments = {
-      "ee-eq-cli",
+      "eq-cli",
       "--preset",
       fixture_path("Bass Enhancing + Perfect EQ - Low Latency.json"),
   };
@@ -169,7 +209,7 @@ void test_cli_args_cli_wins_over_default_preset_env() {
          "cli preset should override the default preset env");
   expect(!args.preset_from_env, "cli preset should clear the env-derived marker");
 
-  unsetenv("EE_EQ_CLI_DEFAULT_PRESET");
+  unsetenv(ee::kDefaultPresetEnv);
 }
 
 void test_load_preset_local_file() {
@@ -481,7 +521,7 @@ void test_label_index_unknown_returns_zero() {
 
 void test_cli_args_help_flag() {
   std::string error;
-  const std::vector<std::string> arguments = {"ee-eq-cli", "--help"};
+  const std::vector<std::string> arguments = {"eq-cli", "--help"};
   const auto args = ee::parse_cli_args(arguments, error);
   expect(error.empty(), "--help should not produce an error");
   expect(args.show_help, "--help should set show_help");
@@ -489,7 +529,7 @@ void test_cli_args_help_flag() {
 
 void test_cli_args_help_short() {
   std::string error;
-  const std::vector<std::string> arguments = {"ee-eq-cli", "-h"};
+  const std::vector<std::string> arguments = {"eq-cli", "-h"};
   const auto args = ee::parse_cli_args(arguments, error);
   expect(error.empty(), "-h should not produce an error");
   expect(args.show_help, "-h should set show_help");
@@ -497,7 +537,7 @@ void test_cli_args_help_short() {
 
 void test_cli_args_version_flag() {
   std::string error;
-  const std::vector<std::string> arguments = {"ee-eq-cli", "--version"};
+  const std::vector<std::string> arguments = {"eq-cli", "--version"};
   const auto args = ee::parse_cli_args(arguments, error);
   expect(error.empty(), "--version should not produce an error");
   expect(args.show_version, "--version should set show_version");
@@ -505,7 +545,7 @@ void test_cli_args_version_flag() {
 
 void test_cli_args_version_short() {
   std::string error;
-  const std::vector<std::string> arguments = {"ee-eq-cli", "-v"};
+  const std::vector<std::string> arguments = {"eq-cli", "-v"};
   const auto args = ee::parse_cli_args(arguments, error);
   expect(error.empty(), "-v should not produce an error");
   expect(args.show_version, "-v should set show_version");
@@ -513,7 +553,7 @@ void test_cli_args_version_short() {
 
 void test_cli_args_dry_run() {
   std::string error;
-  const std::vector<std::string> arguments = {"ee-eq-cli", "--preset", fixture_path("Boosted.json"), "--dry-run"};
+  const std::vector<std::string> arguments = {"eq-cli", "--preset", fixture_path("Boosted.json"), "--dry-run"};
   const auto args = ee::parse_cli_args(arguments, error);
   expect(error.empty(), "--dry-run should parse without error");
   expect(args.dry_run, "--dry-run should set dry_run");
@@ -521,7 +561,7 @@ void test_cli_args_dry_run() {
 
 void test_cli_args_dry_run_short() {
   std::string error;
-  const std::vector<std::string> arguments = {"ee-eq-cli", "--preset", fixture_path("Boosted.json"), "-d"};
+  const std::vector<std::string> arguments = {"eq-cli", "--preset", fixture_path("Boosted.json"), "-d"};
   const auto args = ee::parse_cli_args(arguments, error);
   expect(error.empty(), "-d should parse without error");
   expect(args.dry_run, "-d should set dry_run");
@@ -529,7 +569,7 @@ void test_cli_args_dry_run_short() {
 
 void test_cli_args_sink_selector() {
   std::string error;
-  const std::vector<std::string> arguments = {"ee-eq-cli", "--preset", fixture_path("Boosted.json"), "--sink", "my_sink"};
+  const std::vector<std::string> arguments = {"eq-cli", "--preset", fixture_path("Boosted.json"), "--sink", "my_sink"};
   const auto args = ee::parse_cli_args(arguments, error);
   expect(error.empty(), "--sink should parse without error");
   expect(args.sink_selector == "my_sink", "--sink should set sink_selector");
@@ -537,7 +577,7 @@ void test_cli_args_sink_selector() {
 
 void test_cli_args_sink_short() {
   std::string error;
-  const std::vector<std::string> arguments = {"ee-eq-cli", "--preset", fixture_path("Boosted.json"), "-s", "my_sink"};
+  const std::vector<std::string> arguments = {"eq-cli", "--preset", fixture_path("Boosted.json"), "-s", "my_sink"};
   const auto args = ee::parse_cli_args(arguments, error);
   expect(error.empty(), "-s should parse without error");
   expect(args.sink_selector == "my_sink", "-s should set sink_selector");
@@ -545,7 +585,7 @@ void test_cli_args_sink_short() {
 
 void test_cli_args_preset_short() {
   std::string error;
-  const std::vector<std::string> arguments = {"ee-eq-cli", "-p", fixture_path("Boosted.json")};
+  const std::vector<std::string> arguments = {"eq-cli", "-p", fixture_path("Boosted.json")};
   const auto args = ee::parse_cli_args(arguments, error);
   expect(error.empty(), "-p should parse without error");
   expect(args.preset_source == fixture_path("Boosted.json"), "-p should set preset_source");
@@ -553,21 +593,21 @@ void test_cli_args_preset_short() {
 
 void test_cli_args_unknown_option() {
   std::string error;
-  const std::vector<std::string> arguments = {"ee-eq-cli", "--bogus"};
+  const std::vector<std::string> arguments = {"eq-cli", "--bogus"};
   const auto args = ee::parse_cli_args(arguments, error);
   expect(error == "unknown option: --bogus", "unknown option should produce the expected error");
 }
 
 void test_cli_args_missing_preset_value() {
   std::string error;
-  const std::vector<std::string> arguments = {"ee-eq-cli", "--preset"};
+  const std::vector<std::string> arguments = {"eq-cli", "--preset"};
   const auto args = ee::parse_cli_args(arguments, error);
   expect(error == "missing value for --preset", "missing --preset value should produce the expected error");
 }
 
 void test_cli_args_missing_sink_value() {
   std::string error;
-  const std::vector<std::string> arguments = {"ee-eq-cli", "--sink"};
+  const std::vector<std::string> arguments = {"eq-cli", "--sink"};
   const auto args = ee::parse_cli_args(arguments, error);
   expect(error == "missing value for --sink", "missing --sink value should produce the expected error");
 }
@@ -789,6 +829,30 @@ void test_resolve_kernel_name_from_path() {
          "resolved name should be derived from kernel_path stem");
 }
 
+void test_resolve_kernel_legacy_dir_fallback() {
+  const auto temp_dir = make_temp_dir();
+  expect(temp_dir.is_valid(), "temp dir for legacy resolver fallback should be created");
+  if (!temp_dir.is_valid()) {
+    return;
+  }
+
+  const auto legacy_ir_dir = legacy_resolver_ir_dir(temp_dir);
+  expect(std::filesystem::create_directories(legacy_ir_dir), "legacy IR directory should be created");
+
+  const auto src = fixture_path(std::string(kIrsFixtureName) + ".irs");
+  const auto dst = legacy_ir_dir / (std::string(kIrsFixtureName) + ".irs");
+  std::filesystem::copy_file(src, dst);
+
+  ee::ConvolverPreset preset;
+  preset.kernel_name = kIrsFixtureName;
+  std::string warning;
+  const auto resolved = ee::resolve_convolver_kernel(preset, warning);
+  expect(resolved.has_value(), "legacy IR directory should still resolve kernels");
+  expect(warning.empty(), "legacy exact match should not warn");
+  expect(resolved.has_value() && resolved->path == dst.string(),
+         "legacy IR directory fallback should preserve resolved path");
+}
+
 }  // namespace
 
 int main() {
@@ -801,6 +865,8 @@ int main() {
   test_cli_args_allow_list_sinks_without_preset();
   test_cli_args_require_preset_or_env();
   test_cli_args_use_default_preset_env();
+  test_cli_args_use_legacy_default_preset_env();
+  test_cli_args_new_default_preset_env_wins_over_legacy();
   test_cli_args_cli_wins_over_default_preset_env();
   test_load_preset_local_file();
   test_load_preset_missing_file();
@@ -857,12 +923,13 @@ int main() {
 
   test_resolve_kernel_real_irs();
   test_resolve_kernel_name_from_path();
+  test_resolve_kernel_legacy_dir_fallback();
 
   if (g_failures != 0) {
     ee::log::error(std::format("{} test assertion(s) failed", g_failures));
     return 1;
   }
 
-  ee::log::info("ee-eq-cli tests passed");
+  ee::log::info("eq-cli tests passed");
   return 0;
 }

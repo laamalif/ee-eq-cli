@@ -7,9 +7,11 @@
 #include <cmath>
 #include <cstring>
 #include <cstdlib>
+#include <format>
 #include <sched.h>
 #include <thread>
 
+#include "app_metadata.hpp"
 #include "logging.hpp"
 #include "math_utils.hpp"
 
@@ -18,8 +20,11 @@ namespace ee {
 namespace {
 
 auto use_realtime_convolver_thread() -> bool {
-  if (const char* value = std::getenv("EE_EQ_CLI_CONVOLVER_SCHED_FIFO"); value != nullptr) {
-    return *value != '\0' && std::strcmp(value, "0") != 0;
+  if (const auto env = read_compat_env(kConvolverSchedFifoEnv, kLegacyConvolverSchedFifoEnv); env) {
+    if (env.used_legacy) {
+      log::warn(std::format("{} is deprecated; use {}", kLegacyConvolverSchedFifoEnv, kConvolverSchedFifoEnv));
+    }
+    return compat_env_enabled(env);
   }
   return false;
 }

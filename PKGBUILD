@@ -1,11 +1,11 @@
 # Maintainer: local
 
-pkgname=ee-eq-cli
-pkgver=0.3.1.7
+pkgname=eq-cli
+pkgver=0.3.1.8
 pkgrel=1
-pkgdesc='Minimal headless EasyEffects-compatible EQ preset loader for PipeWire/LV2'
+pkgdesc='Headless PipeWire EQ/DSP runner for EasyEffects-compatible presets'
 arch=(x86_64 aarch64)
-url='https://github.com/laamalif/ee-eq-cli/'
+url='https://github.com/laamalif/eq-cli/'
 license=('MIT')
 depends=(
   'pipewire'
@@ -23,7 +23,8 @@ optdepends=(
   'lsp-plugins: LSP LV2 equalizer plugin required at runtime'
 )
 conflicts=(ee-eq-cli)
-provides=(ee-eq-cli)
+provides=(eq-cli ee-eq-cli)
+replaces=(ee-eq-cli)
 source=()
 sha256sums=()
 
@@ -43,6 +44,7 @@ build() {
   package() {
     cd "${startdir}"
 
-    install -Dm755 build/ee-eq-cli "${pkgdir}/usr/bin/ee-eq-cli"
+    install -Dm755 build/eq-cli "${pkgdir}/usr/bin/eq-cli"
+    ln -sf eq-cli "${pkgdir}/usr/bin/ee-eq-cli"
     install -Dm644 README.md "${pkgdir}/usr/share/doc/${pkgname}/README.md"
 }

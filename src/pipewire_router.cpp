@@ -33,6 +33,7 @@
 #include <thread>
 #include <vector>
 
+#include "app_metadata.hpp"
 #include "logging.hpp"
 #include "convolver_host.hpp"
 #include "kernel_resolver.hpp"
@@ -86,15 +87,21 @@ auto parse_uint64(const char* value) -> uint64_t {
 }
 
 auto convolver_disabled_by_env() -> bool {
-  if (const char* value = std::getenv("EE_EQ_CLI_DISABLE_CONVOLVER"); value != nullptr) {
-    return *value != '\0' && std::strcmp(value, "0") != 0;
+  if (const auto env = read_compat_env(kDisableConvolverEnv, kLegacyDisableConvolverEnv); env) {
+    if (env.used_legacy) {
+      log::warn(std::format("{} is deprecated; use {}", kLegacyDisableConvolverEnv, kDisableConvolverEnv));
+    }
+    return compat_env_enabled(env);
   }
   return false;
 }
 
 auto use_rt_convolver_filter() -> bool {
-  if (const char* value = std::getenv("EE_EQ_CLI_CONVOLVER_RT_PROCESS"); value != nullptr) {
-    return *value != '\0' && std::strcmp(value, "0") != 0;
+  if (const auto env = read_compat_env(kConvolverRtProcessEnv, kLegacyConvolverRtProcessEnv); env) {
+    if (env.used_legacy) {
+      log::warn(std::format("{} is deprecated; use {}", kLegacyConvolverRtProcessEnv, kConvolverRtProcessEnv));
+    }
+    return compat_env_enabled(env);
   }
   return false;
 }
@@ -1111,7 +1118,7 @@ PipeWireRouter::~PipeWireRouter() {
 auto PipeWireRouter::start(std::string& error) -> bool {
   std::optional<ResolvedKernel> resolved_convolver;
   if (preset_.convolver.has_value() && convolver_disabled_by_env()) {
-    log::warn("convolver disabled by EE_EQ_CLI_DISABLE_CONVOLVER");
+    log::warn(std::format("convolver disabled by {}", kDisableConvolverEnv));
     std::erase(preset_.plugin_order, std::string("convolver"));
     preset_.convolver.reset();
   }
