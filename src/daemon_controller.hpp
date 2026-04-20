@@ -47,6 +47,7 @@ class DaemonController {
   mutable std::mutex mutex_;
   DaemonStatus status_;
   std::optional<DesiredConfig> desired_;
+  bool init_error_degraded_ = false;
   std::function<void()> shutdown_callback_;
 };
 

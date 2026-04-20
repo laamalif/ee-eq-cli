@@ -99,13 +99,16 @@ auto DaemonController::status_locked() const -> DaemonStatus {
     status.effective.volume = snapshot.volume;
     if (snapshot.session_active) {
       status.session_state = SessionLifecycleState::Enabled;
+      if (!snapshot.init_error.empty()) {
+        status.health = HealthState::Degraded;
+        status.last_error = snapshot.init_error;
+      } else if (init_error_degraded_) {
+        status.health = HealthState::Ok;
+        status.last_error.clear();
+      }
     } else {
       status.session_state = SessionLifecycleState::Degraded;
       status.health = HealthState::Degraded;
-    }
-    if (!snapshot.init_error.empty()) {
-      status.health = HealthState::Degraded;
-      status.last_error = snapshot.init_error;
     }
   }
   return status;
@@ -342,6 +345,11 @@ void DaemonController::set_runtime_state_from_backend_locked() {
   if (!snapshot.init_error.empty()) {
     status_.health = HealthState::Degraded;
     status_.last_error = snapshot.init_error;
+    init_error_degraded_ = true;
+  } else if (init_error_degraded_) {
+    status_.health = HealthState::Ok;
+    status_.last_error.clear();
+    init_error_degraded_ = false;
   }
 }
 
