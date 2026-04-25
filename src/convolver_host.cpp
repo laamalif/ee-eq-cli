@@ -5,9 +5,10 @@
 #include <algorithm>
 #include <chrono>
 #include <cmath>
-#include <cstring>
+#include <cstddef>
 #include <cstdlib>
 #include <cstring>
+#include <ranges>
 #include <sched.h>
 #include <thread>
 
@@ -18,6 +19,14 @@
 namespace ee {
 
 namespace {
+
+auto is_power_of_two(uint32_t value) -> bool {
+  return value != 0 && (value & (value - 1U)) == 0;
+}
+
+void erase_prefix(std::vector<float>& values, size_t count) {
+  values.erase(values.begin(), values.begin() + static_cast<std::ptrdiff_t>(count));
+}
 
 auto use_realtime_convolver_thread() -> bool {
   if (const char* value = std::getenv(kConvolverSchedFifoEnv); value != nullptr) {
@@ -78,6 +87,22 @@ auto ConvolverHost::load_kernel_file(const ResolvedKernel& kernel, std::string& 
   }
 
   return data;
+}
+
+auto ConvolverHost::normalized_zita_block_size(uint32_t stream_block_size) -> uint32_t {
+  if (stream_block_size == 0) {
+    return 0;
+  }
+
+  uint32_t block_size = stream_block_size;
+  if (!is_power_of_two(block_size)) {
+    block_size = 1;
+    while ((block_size << 1U) <= stream_block_size) {
+      block_size <<= 1U;
+    }
+  }
+
+  return std::max(block_size, 64U);
 }
 
 void ConvolverHost::normalize_kernel(KernelData& kernel) {
@@ -164,9 +189,14 @@ void ConvolverHost::apply_ir_width_and_autogain() {
   }
 }
 
-auto ConvolverHost::ensure_ready(uint32_t block_size) -> bool {
+auto ConvolverHost::ensure_ready(uint32_t stream_block_size) -> bool {
   std::scoped_lock lock(mutex_);
-  if (ready_.load(std::memory_order_acquire) && block_size_ == block_size) {
+  const uint32_t block_size = normalized_zita_block_size(stream_block_size);
+  if (stream_block_size == 0 || block_size == 0) {
+    return false;
+  }
+
+  if (ready_.load(std::memory_order_acquire) && stream_block_size_ == stream_block_size && block_size_ == block_size) {
     return true;
   }
 
@@ -178,6 +208,7 @@ auto ConvolverHost::ensure_ready(uint32_t block_size) -> bool {
     }
   }
   conv_ = std::make_unique<Convproc>();
+  stream_block_size_ = stream_block_size;
   block_size_ = block_size;
   conv_->set_options(0);
 
@@ -210,6 +241,18 @@ auto ConvolverHost::ensure_ready(uint32_t block_size) -> bool {
     }
   }
 
+  pending_input_left_.clear();
+  pending_input_right_.clear();
+  pending_output_left_.clear();
+  pending_output_right_.clear();
+  block_left_.assign(block_size_, 0.0F);
+  block_right_.assign(block_size_, 0.0F);
+  const auto adapter_capacity = static_cast<size_t>(stream_block_size_) + static_cast<size_t>(block_size_);
+  pending_input_left_.reserve(adapter_capacity);
+  pending_input_right_.reserve(adapter_capacity);
+  pending_output_left_.reserve(adapter_capacity);
+  pending_output_right_.reserve(adapter_capacity);
+
   ready_.store(true, std::memory_order_release);
   return true;
 }
@@ -223,10 +266,17 @@ auto ConvolverHost::process(std::span<float> left, std::span<float> right) -> bo
   if (!conv_ || conv_->state() != Convproc::ST_PROC) {
     return false;
   }
-  if (left.size() != block_size_ || right.size() != block_size_) {
+  if (left.size() != stream_block_size_ || right.size() != stream_block_size_) {
     return false;
   }
+  if (stream_block_size_ != block_size_) {
+    return process_buffered(left, right);
+  }
 
+  return process_zita_block(left, right);
+}
+
+auto ConvolverHost::process_zita_block(std::span<float> left, std::span<float> right) -> bool {
   auto left_in = std::span{conv_->inpdata(0), block_size_};
   auto right_in = std::span{conv_->inpdata(1), block_size_};
   auto left_out = std::span{conv_->outdata(0), block_size_};
@@ -244,6 +294,42 @@ auto ConvolverHost::process(std::span<float> left, std::span<float> right) -> bo
   return true;
 }
 
+auto ConvolverHost::process_buffered(std::span<float> left, std::span<float> right) -> bool {
+  pending_input_left_.insert(pending_input_left_.end(), left.begin(), left.end());
+  pending_input_right_.insert(pending_input_right_.end(), right.begin(), right.end());
+
+  while (pending_input_left_.size() >= block_size_) {
+    std::ranges::copy_n(pending_input_left_.begin(), block_size_, block_left_.begin());
+    std::ranges::copy_n(pending_input_right_.begin(), block_size_, block_right_.begin());
+
+    if (!process_zita_block(block_left_, block_right_)) {
+      return false;
+    }
+
+    pending_output_left_.insert(pending_output_left_.end(), block_left_.begin(), block_left_.end());
+    pending_output_right_.insert(pending_output_right_.end(), block_right_.begin(), block_right_.end());
+    erase_prefix(pending_input_left_, block_size_);
+    erase_prefix(pending_input_right_, block_size_);
+  }
+
+  if (pending_output_left_.size() >= left.size()) {
+    std::ranges::copy_n(pending_output_left_.begin(), left.size(), left.begin());
+    std::ranges::copy_n(pending_output_right_.begin(), right.size(), right.begin());
+    erase_prefix(pending_output_left_, left.size());
+    erase_prefix(pending_output_right_, right.size());
+    return true;
+  }
+
+  const auto offset = left.size() - pending_output_left_.size();
+  std::fill(left.begin(), left.begin() + static_cast<std::ptrdiff_t>(offset), 0.0F);
+  std::fill(right.begin(), right.begin() + static_cast<std::ptrdiff_t>(offset), 0.0F);
+  std::ranges::copy(pending_output_left_, left.begin() + static_cast<std::ptrdiff_t>(offset));
+  std::ranges::copy(pending_output_right_, right.begin() + static_cast<std::ptrdiff_t>(offset));
+  pending_output_left_.clear();
+  pending_output_right_.clear();
+  return true;
+}
+
 void ConvolverHost::stop() {
   std::scoped_lock lock(mutex_);
   ready_.store(false, std::memory_order_relaxed);
@@ -253,6 +339,10 @@ void ConvolverHost::stop() {
       std::this_thread::sleep_for(std::chrono::milliseconds(1));
     }
   }
+  pending_input_left_.clear();
+  pending_input_right_.clear();
+  pending_output_left_.clear();
+  pending_output_right_.clear();
 }
 
 }  // namespace ee

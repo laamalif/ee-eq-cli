@@ -4,6 +4,7 @@
 #include <format>
 #include <filesystem>
 #include <fstream>
+#include <ranges>
 #include <sndfile.hh>
 #include <string>
 #include <vector>
@@ -50,6 +51,14 @@ void expect_near(double actual, double expected, double tolerance, std::string_v
     ee::log::error(std::format("FAIL: {} (expected {}, got {})", message, expected, actual));
     ++g_failures;
   }
+}
+
+auto stereo_energy(const std::vector<float>& left, const std::vector<float>& right) -> float {
+  float energy = 0.0F;
+  for (size_t i = 0; i < left.size(); ++i) {
+    energy += left[i] * left[i] + right[i] * right[i];
+  }
+  return energy;
 }
 
 auto fixture_path(std::string_view file_name) -> std::string {
@@ -718,26 +727,74 @@ void test_convolver_process_round_trip() {
 
   expect(host.process(left, right), "convolver process should succeed");
 
-  float energy = 0.0F;
-  for (size_t i = 0; i < 256; ++i) {
-    energy += left[i] * left[i] + right[i] * right[i];
-  }
-  expect(energy > 0.0F, "convolver output should contain non-zero energy after impulse input");
+  expect(stereo_energy(left, right) > 0.0F, "convolver output should contain non-zero energy after impulse input");
 }
 
-void test_convolver_process_wrong_block_size() {
+void test_convolver_process_non_power_of_two_block_size() {
   const auto irs_path = fixture_path(std::string(kIrsFixtureName) + ".irs");
   ee::ResolvedKernel kernel{.name = kIrsFixtureName, .path = irs_path, .is_sofa = false};
   ee::ConvolverPreset preset;
   ee::ConvolverHost host;
   std::string error;
 
-  expect(host.load(preset, kernel, error), "IRS should load for block size mismatch test");
-  expect(host.ensure_ready(256), "convolver should become ready with block size 256");
+  expect(host.load(preset, kernel, error), "IRS should load for non-power-of-two block size test");
+  expect(host.ensure_ready(96), "convolver should become ready with stream block size 96");
+
+  std::vector<float> left(96, 0.0F);
+  std::vector<float> right(96, 0.0F);
+  left[0] = 1.0F;
+  right[0] = 1.0F;
+
+  float energy = 0.0F;
+  for (int i = 0; i < 3; ++i) {
+    expect(host.process(left, right), "non-power-of-two stream block should process through the adapter");
+    energy += stereo_energy(left, right);
+    std::ranges::fill(left, 0.0F);
+    std::ranges::fill(right, 0.0F);
+  }
+
+  expect(energy > 0.0F, "non-power-of-two stream block should produce convolver output");
+}
+
+void test_convolver_process_sub_minimum_block_size() {
+  const auto irs_path = fixture_path(std::string(kIrsFixtureName) + ".irs");
+  ee::ResolvedKernel kernel{.name = kIrsFixtureName, .path = irs_path, .is_sofa = false};
+  ee::ConvolverPreset preset;
+  ee::ConvolverHost host;
+  std::string error;
+
+  expect(host.load(preset, kernel, error), "IRS should load for sub-minimum block size test");
+  expect(host.ensure_ready(32), "convolver should become ready with stream block size 32");
+
+  std::vector<float> left(32, 0.0F);
+  std::vector<float> right(32, 0.0F);
+  left[0] = 1.0F;
+  right[0] = 1.0F;
+
+  float energy = 0.0F;
+  for (int i = 0; i < 4; ++i) {
+    expect(host.process(left, right), "sub-64 stream block should process through the adapter");
+    energy += stereo_energy(left, right);
+    std::ranges::fill(left, 0.0F);
+    std::ranges::fill(right, 0.0F);
+  }
+
+  expect(energy > 0.0F, "sub-64 stream block should produce convolver output");
+}
+
+void test_convolver_process_unconfigured_stream_block_size() {
+  const auto irs_path = fixture_path(std::string(kIrsFixtureName) + ".irs");
+  ee::ResolvedKernel kernel{.name = kIrsFixtureName, .path = irs_path, .is_sofa = false};
+  ee::ConvolverPreset preset;
+  ee::ConvolverHost host;
+  std::string error;
+
+  expect(host.load(preset, kernel, error), "IRS should load for stream block size mismatch test");
+  expect(host.ensure_ready(256), "convolver should become ready with stream block size 256");
 
   std::vector<float> left(512, 0.0F);
   std::vector<float> right(512, 0.0F);
-  expect(!host.process(left, right), "process with wrong block size should fail");
+  expect(!host.process(left, right), "process with unconfigured stream block size should fail");
 }
 
 // --- Kernel resolver with real IRS ---
@@ -854,7 +911,9 @@ int main() {
 
   test_convolver_load_real_irs();
   test_convolver_process_round_trip();
-  test_convolver_process_wrong_block_size();
+  test_convolver_process_non_power_of_two_block_size();
+  test_convolver_process_sub_minimum_block_size();
+  test_convolver_process_unconfigured_stream_block_size();
 
   test_resolve_kernel_real_irs();
   test_resolve_kernel_name_from_path();
